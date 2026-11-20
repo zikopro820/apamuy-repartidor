@@ -117,14 +117,21 @@ const Sesion = {
   async alCambiar(cb) {
     if (DEMO) { Sesion.usuario = store.get("am_sesion", null); cb(Sesion.usuario); return; }
     const { au, auth } = await fb();
-    au.getRedirectResult(auth).catch(e => e.code && toast("No se pudo entrar con Google: " + e.code, true));
+    // Volviendo de la página de Google: si algo falló, lo dejamos escrito en pantalla
+    const pend = sessionStorage.getItem("am_auth_pend"); sessionStorage.removeItem("am_auth_pend");
+    au.getRedirectResult(auth).then(r => { if (pend && !r && !auth.currentUser) avisarErrorAuth("Volviste de Google, pero el navegador no guardó la sesión. Ábrelo en Chrome o Safari (no dentro de WhatsApp o Facebook) y vuelve a intentar."); })
+      .catch(e => avisarErrorAuth(errorAuth(e)));
     au.onAuthStateChanged(auth, u => { Sesion.usuario = u ? { uid: u.uid, email: (u.email || "").toLowerCase(), nombre: u.displayName || "", foto: u.photoURL || "" } : null; cb(Sesion.usuario); });
   },
   async google() {
     if (DEMO) return Sesion._demo({ uid: "cli-demo", email: "cliente@demo.pe", nombre: "Cliente Demo", foto: "" });
     const { au, auth } = await fb(), p = new au.GoogleAuthProvider(); p.setCustomParameters({ prompt: "select_account" });
+    const redirigir = () => { sessionStorage.setItem("am_auth_pend", "1"); return au.signInWithRedirect(auth, p); };
+    // En celular o con la app instalada la ventanita emergente falla a menudo: vamos a Google y volvemos en la misma pestaña
+    const movil = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent) || matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+    if (movil) return redirigir();
     try { await au.signInWithPopup(auth, p); }
-    catch (e) { if (/popup-blocked|operation-not-supported|cancelled-popup/.test(e.code || "")) return au.signInWithRedirect(auth, p); if (!/popup-closed/.test(e.code || "")) throw e; }
+    catch (e) { if (/popup-blocked|operation-not-supported|cancelled-popup/.test(e.code || "")) return redirigir(); if (!/popup-closed/.test(e.code || "")) throw e; }
   },
   async correo(email, pass) { if (DEMO) return Sesion._demo({ uid: "u-" + slug(email), email, nombre: "" }); const { au, auth } = await fb(); await au.signInWithEmailAndPassword(auth, email, pass); },
   async crear(email, pass) { if (DEMO) return Sesion._demo({ uid: "u-" + slug(email), email, nombre: "" }); const { au, auth } = await fb(); await au.createUserWithEmailAndPassword(auth, email, pass); },
@@ -132,10 +139,15 @@ const Sesion = {
   async salir() { if (DEMO) { store.del("am_sesion"); location.reload(); return; } const { au, auth } = await fb(); await au.signOut(auth); location.reload(); },
   _demo(u) { store.set("am_sesion", u); location.reload(); }
 };
+// Error al entrar con Google: queda escrito en la pantalla de entrada (no solo un aviso que desaparece)
+function avisarErrorAuth(m) { try { sessionStorage.setItem("am_auth_err", m); } catch (e) {} $$(".js-auth-err").forEach(x => x.textContent = m); toast(m, true); }
+function errorAuthGuardado(el) { const m = sessionStorage.getItem("am_auth_err"); if (m && el) { el.textContent = m; sessionStorage.removeItem("am_auth_err"); } }
 const esAdmin = u => !!u && (AP.admins || []).map(x => x.toLowerCase()).includes(String(u.email || "").toLowerCase());
 const errorAuth = e => ({ "auth/invalid-credential": "Correo o contraseña incorrectos.", "auth/wrong-password": "Correo o contraseña incorrectos.", "auth/user-not-found": "No existe una cuenta con ese correo.",
   "auth/email-already-in-use": "Ese correo ya tiene cuenta. Entra con «Ya tengo cuenta».", "auth/weak-password": "La contraseña debe tener al menos 6 caracteres.", "auth/invalid-email": "El correo no es válido.",
-  "auth/unauthorized-domain": "Falta autorizar este dominio en Firebase → Authentication → Dominios autorizados.", "auth/too-many-requests": "Demasiados intentos. Espera unos minutos." }[e.code] || ("No se pudo: " + (e.code || e.message)));
+  "auth/unauthorized-domain": "Falta autorizar este dominio en Firebase → Authentication → Dominios autorizados.", "auth/too-many-requests": "Demasiados intentos. Espera unos minutos.",
+  "auth/network-request-failed": "Sin conexión a internet. Revisa tu señal e inténtalo de nuevo.", "auth/web-storage-unsupported": "Tu navegador bloquea el inicio de sesión. Ábrelo en Chrome o Safari.",
+  "auth/internal-error": "Google no respondió. Inténtalo de nuevo en unos segundos.", "auth/operation-not-allowed": "El inicio con Google no está activado en Firebase → Authentication." }[e.code] || ("No se pudo: " + (e.code || e.message)));
 
 /* ---------- Configuración general de la plataforma ---------- */
 const WEB_BASE = { titulo: "¿Qué quieres hoy?", subtitulo: "Pide a los negocios de tu ciudad. Te lo traemos a tu puerta.", buscador: "Busca comida, farmacia, ferretería…", anuncio: "",
