@@ -1,0 +1,37 @@
+APAMUY REPARTIDOR — Cómo dejarlo funcionando (etapa 2)
+=====================================================
+Dirección final: https://reparto.apamuy.app
+
+1) FIREBASE (proyecto apamuy-faf7a)
+   a. Firestore Database → Reglas → borra todo → pega el NUEVO firestore.rules (viene en apamuy-panel) → Publicar.
+   b. Storage → Reglas → borra todo → pega el NUEVO storage.rules (viene en apamuy-panel) → Publicar.
+      (Los DNI, antecedentes y capturas SOLO los puede abrir el repartidor dueño y el admin.)
+   c. Authentication → Configuración → Dominios autorizados → Agregar dominio: reparto.apamuy.app
+
+2) HOSTINGER (DNS de apamuy.app)
+   Agrega un registro:  Tipo CNAME · Nombre: reparto · Apunta a: zikopro820.github.io · TTL por defecto.
+   (Igual que hiciste con «panel».)
+
+3) GITHUB (repo apamuy-repartidor)
+   - Sube TODO lo que hay dentro del ZIP (incluye el archivo CNAME y firebase-config.js).
+   - Settings → Pages → Branch: main / root → Save.
+   - En «Custom domain» debe salir reparto.apamuy.app → cuando aparezca, marca «Enforce HTTPS».
+
+4) PANEL (como admin) → «Comisión y delivery»
+   - Sección Repartidores: % que pagan (10) y precio de la casaca (40) → ya vienen así.
+   - Sección «Tu Yape»: pon TU número de Yape, a nombre de quién, y sube tu QR → Guardar.
+     Ahí te pagan la casaca y el 10 % diario.
+   - Rubros: Ferretería y Talleres deben decir «🚗 envío grande». Si no lo dice, edita el rubro y
+     marca «Envío grande».
+
+5) PRUEBA
+   a. Con OTRA cuenta de Google abre reparto.apamuy.app en el celular → regístrate (7 pasos).
+   b. Panel (admin) → Repartidores → Ver → revisa documentos → Estado «Activo» → Guardar.
+   c. En el celular del repartidor: activa «Disponible» (da permiso de GPS y notificaciones).
+   d. Haz un pedido de delivery en apamuy.app → el negocio lo ACEPTA → al repartidor le suena.
+   e. Repartidor: Aceptar → Ya recogí → Entregado. El cliente lo ve en el mapa en vivo.
+
+IMPORTANTE PARA LOS REPARTIDORES
+ - Deben instalar la app (Android: Chrome ⋮ → Instalar app. iPhone: Compartir → Agregar a inicio).
+ - Mientras están «Disponibles» deben dejar la app ABIERTA: la pantalla no se apaga sola.
+   Las notificaciones con la app cerrada llegan en la siguiente parte (apamuy-servidor).
