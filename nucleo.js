@@ -199,12 +199,20 @@ function estaAbierto(n) {
 }
 
 /* ---------- Mapas (OpenStreetMap, gratis) ---------- */
-const LEAF = "https://unpkg.com/leaflet@1.9.4/dist/leaflet";
-async function leaflet() { cargarCSS(LEAF + ".css"); await cargarScript(LEAF + ".js"); return window.L; }
+// Leaflet 1.9.4 va dentro de cada web (carpeta lib/): el mapa no depende de servidores externos
+const LEAF = "lib/leaflet", LEAF_CDN = "https://unpkg.com/leaflet@1.9.4/dist/leaflet";
+async function cargarLeaflet() {   // (no se llama «leaflet»: la librería pisa window.leaflet al cargar)
+  if (window.L && window.L.map) return window.L;
+  cargarCSS(LEAF + ".css");
+  try { await cargarScript(LEAF + ".js"); } catch (e) { cargarCSS(LEAF_CDN + ".css"); await cargarScript(LEAF_CDN + ".js"); }   // respaldo
+  return window.L;
+}
+// Si el mapa no carga (sin señal), deja un botón para reintentar
+function mapaFallo(el, reintentar) { el.innerHTML = `<div class="mapa-err"><p>No se pudo cargar el mapa. Revisa tu señal.</p><button type="button" class="btn btn-light btn-sm">Reintentar</button></div>`; el.querySelector("button").onclick = reintentar; }
 const pinIcono = (L, color, txt) => L.divIcon({ className: "am-pin", html: `<span style="--c:${color}"><i>${txt || ""}</i></span>`, iconSize: [34, 42], iconAnchor: [17, 40] });
 // Mapa con un pin que se puede mover. onMover({lat,lng}) cada vez que cambia.
 async function mapaPin(el, pos, onMover, opts = {}) {
-  let L; try { L = await leaflet(); } catch (e) { el.innerHTML = `<p class="muted">No se pudo cargar el mapa. Revisa tu internet.</p>`; return null; }
+  let L; try { L = await cargarLeaflet(); } catch (e) { mapaFallo(el, () => mapaPin(el, pos, onMover, opts)); return null; }
   const p = pos && pos.lat != null ? pos : CONF.centro;
   const m = L.map(el, { zoomControl: true, attributionControl: true }).setView([p.lat, p.lng], pos && pos.lat != null ? 17 : 14);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(m);
@@ -216,7 +224,8 @@ async function mapaPin(el, pos, onMover, opts = {}) {
 }
 // Mapa de seguimiento con varios puntos: [{lat,lng,color,txt}]
 async function mapaPuntos(el, puntos) {
-  let L; try { L = await leaflet(); } catch (e) { el.innerHTML = `<p class="muted">No se pudo cargar el mapa.</p>`; return null; }
+  let L; try { L = await cargarLeaflet(); } catch (e) { console.warn("mapa", e); mapaFallo(el, () => mapaPuntos(el, puntos)); return null; }
+  el.innerHTML = "";
   const m = L.map(el, { zoomControl: false }); L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(m);
   const capa = L.layerGroup().addTo(m);
   const pintar = ps => { capa.clearLayers(); const ok = ps.filter(x => x && x.lat != null); ok.forEach(x => L.marker([x.lat, x.lng], { icon: pinIcono(L, x.color, x.txt) }).addTo(capa));
