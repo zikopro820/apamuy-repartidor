@@ -27,6 +27,12 @@ window.AM_DEMO = function () {
   // Carlos repartió ayer y no pagó su 10 % → la app lo bloquea hasta que pague
   [["AP-DEMO01", 6], ["AP-DEMO02", 7.5]].forEach(([c, envio]) => db.pedidos[c] = { codigo: c, negocioId: "demo-pollon", negocio: { nombre: "Pollería El Pollón (ejemplo)" }, clienteUid: "cli-demo", cliente: { nombre: "Cliente Demo", celular: "999888777" },
     items: [{ n: "1/4 de pollo", cant: 1, precio: 18 }], subtotal: 18, envio, km: 3, total: 18 + envio, entrega: "delivery", pago: "Efectivo", estado: "entregado", dia: dia(1), mes: dia(1).slice(0, 7), creado: ahora, repUid: "rep-carlos", repartidor: { uid: "rep-carlos", nombre: "Carlos Huamán Ccori", vehiculo: "carro" } });
+  // Perfil público (lo que ve el cliente) y foto de perfil de ejemplo
+  const cara = (c, l) => "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><rect width="120" height="120" fill="${c}"/><circle cx="60" cy="46" r="22" fill="#fff" opacity=".9"/><path d="M20 112a40 34 0 0 1 80 0" fill="#fff" opacity=".9"/><text x="60" y="54" font-family="sans-serif" font-size="20" font-weight="700" text-anchor="middle" fill="${c}">${l}</text></svg>`);
+  Object.assign(db.repartidores["rep-juan"], { fotoPerfil: cara("#3a2c6b", "J"), marca: "Honda CB 125", color: "Roja" });
+  Object.assign(db.repartidores["rep-carlos"], { fotoPerfil: cara("#157347", "C"), marca: "Toyota Yaris", color: "Plata" });
+  db.repPublico = { "rep-juan": { nombre: "Juan Mamani", foto: cara("#3a2c6b", "J"), vehiculo: "moto", marca: "Honda CB 125", color: "Roja", placa: "1234-4A", prov: "Cusco|Cusco", entregas: 37, estrellasSum: 176, estrellasN: 37 },
+    "rep-carlos": { nombre: "Carlos Huamán", foto: cara("#157347", "C"), vehiculo: "carro", marca: "Toyota Yaris", color: "Plata", placa: "X1Y-234", prov: "Cusco|Cusco", entregas: 12, estrellasSum: 55, estrellasN: 12 } };
   db.pagosRep = {};
   db.config.general.cobro = { yape: "984 000 000", titular: "Apamuy (ejemplo)", qr: "" };
   return db;

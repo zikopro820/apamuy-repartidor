@@ -5,7 +5,8 @@ Dirección final: https://reparto.apamuy.app
 1) FIREBASE (proyecto apamuy-faf7a)
    a. Firestore Database → Reglas → borra todo → pega el NUEVO firestore.rules (viene en apamuy-panel) → Publicar.
    b. Storage → Reglas → borra todo → pega el NUEVO storage.rules (viene en apamuy-panel) → Publicar.
-      (Los DNI, antecedentes y capturas SOLO los puede abrir el repartidor dueño y el admin.)
+      (Los DNI, antecedentes y capturas SOLO los puede abrir el repartidor dueño y el admin.
+       La foto de perfil sí es pública: la ven los clientes cuando tú la apruebas.)
    c. Authentication → Configuración → Dominios autorizados → Agregar dominio: reparto.apamuy.app
 
 2) HOSTINGER (DNS de apamuy.app)

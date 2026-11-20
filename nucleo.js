@@ -23,7 +23,8 @@ const wa = (num, txt) => { let n = String(num || "").replace(/\D/g, ""); if (n.l
 const abrirWA = (num, txt) => window.open(wa(num, txt), "_blank", "noopener");
 function toast(m, bad) { let x = $("#toast"); if (!x) { x = document.createElement("div"); x.id = "toast"; x.setAttribute("role", "status"); document.body.appendChild(x); } x.textContent = m; x.className = "show" + (bad ? " bad" : ""); clearTimeout(x._t); x._t = setTimeout(() => x.className = "", 3500); }
 function cargarScript(src) { return new Promise((ok, no) => { const ya = $(`script[src="${src}"]`); if (ya?.dataset.ok) return ok();
-  if (ya) { ya.addEventListener("load", () => ok()); ya.addEventListener("error", no); return; } const s = document.createElement("script"); s.src = src; s.onload = () => { s.dataset.ok = 1; ok(); }; s.onerror = no; document.head.appendChild(s); }); }
+  if (ya) { ya.addEventListener("load", () => ok()); ya.addEventListener("error", no); return; }   // se está cargando: espera a la misma
+  const s = document.createElement("script"); s.src = src; s.onload = () => { s.dataset.ok = 1; ok(); }; s.onerror = e => { s.remove(); no(e); }; document.head.appendChild(s); }); }   // si falla, se quita para poder reintentar
 function cargarCSS(href) { if (!$(`link[href="${href}"]`)) document.head.insertAdjacentHTML("beforeend", `<link rel="stylesheet" href="${href}">`); }
 function redimensionar(file, max = 1000, q = .78, tipo = "image/jpeg") { return new Promise((ok, no) => { const fr = new FileReader(); fr.onerror = no; fr.onload = () => { const im = new Image(); im.onerror = no; im.onload = () => {
   const k = Math.min(1, max / Math.max(im.width, im.height)), c = document.createElement("canvas"); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
@@ -141,10 +142,11 @@ const WEB_BASE = { titulo: "¿Qué quieres hoy?", subtitulo: "Pide a los negocio
   mostrarBanners: true, mostrarDestacados: true, tituloDestacados: "Lo más recomendado", tituloNegocios: "Negocios en tu ciudad", pie: "Te lo traemos. Pide a los negocios de tu ciudad.", facebook: "", instagram: "", tiktok: "" };
 // rep: lo que paga el repartidor (casaca y % de su ganancia del día). cobro: Yape de Apamuy donde le pagan.
 const CONFIG_BASE = { comision: 10, delivery: { base: 4, porKm: 1, maxKm: 8 }, centro: AP.centro || { lat: -13.5226, lng: -71.9673 }, soporte: "", ciudadInicial: { dep: "Cusco", prov: "Cusco" }, web: WEB_BASE, tipos: [],
-  rep: { comision: 10, casaca: 40 }, cobro: { yape: "", titular: "", qr: "" } };
+  rep: { comision: 10, casaca: 40 }, cobro: { yape: "", titular: "", qr: "" },
+  envio: { minimo: 5, base: 5, porKm: 1.2, factorGrande: 1.5, maxKm: 300 } };
 let CONF = { ...CONFIG_BASE };
 async function cargarConfig() { const c = await DB.get("config", "general").catch(() => null) || {};
-  CONF = { ...CONFIG_BASE, ...c, delivery: { ...CONFIG_BASE.delivery, ...(c.delivery || {}) }, web: { ...WEB_BASE, ...(c.web || {}) }, rep: { ...CONFIG_BASE.rep, ...(c.rep || {}) }, cobro: { ...CONFIG_BASE.cobro, ...(c.cobro || {}) }, tipos: c.tipos || [] }; return CONF; }
+  CONF = { ...CONFIG_BASE, ...c, delivery: { ...CONFIG_BASE.delivery, ...(c.delivery || {}) }, web: { ...WEB_BASE, ...(c.web || {}) }, rep: { ...CONFIG_BASE.rep, ...(c.rep || {}) }, cobro: { ...CONFIG_BASE.cobro, ...(c.cobro || {}) }, envio: { ...CONFIG_BASE.envio, ...(c.envio || {}) }, tipos: c.tipos || [] }; return CONF; }
 
 /* ---------- Rubros (Comida, Farmacia, Talleres…) que crea el admin ---------- */
 let RUBROS = [];
@@ -218,4 +220,15 @@ const VEHIC = { moto: ["🛵", "Moto"], bici: ["🚲", "Bici"], carro: ["🚗", 
 const vehTxt = v => (VEHIC[v] || ["🛵", v || ""]).join(" ");
 // ¿Este repartidor puede llevar esta oferta? todos | carro (envío grande) | moto (envío pequeño de ferretería/taller)
 const puedeLlevar = (oferta, veh) => !oferta.vehiculo || oferta.vehiculo === "todos" || oferta.vehiculo === veh;
+/* ---------- Envíos de paquetes (el cliente pone el precio, estilo inDrive) ---------- */
+const TAM = { sobre: ["Sobre o documentos", "Cartas, papeles, llaves"], pequeno: ["Paquete pequeño", "Cabe en una mochila"], grande: ["Paquete grande", "Solo en carro: cajas, bultos"] };
+const EST_E = { buscando: ["Buscando repartidor", "warn"], asignado: ["Repartidor en camino al recojo", "info"], camino: ["En camino a la entrega", "info"], entregado: ["Entregado", "ok"], cancelado: ["Cancelado", "bad"] };
+// Precio sugerido (solo guía: el cliente decide). Redondeado a 0.50 y nunca menos del mínimo.
+function sugerirEnvio(km, tam, e = CONF.envio) { if (km == null) return e.minimo; const v = (e.base + Math.max(0, km - 1) * e.porKm) * (tam === "grande" ? e.factorGrande : 1); return Math.max(e.minimo, Math.ceil(v * 2) / 2); }
+// ¿Un repartidor puede llevar este envío? Grande = solo carro. Bici: hasta 15 km y en la misma ciudad.
+const puedeEnvio = (en, veh) => (en.tamano !== "grande" || veh === "carro") && (veh !== "bici" || (!en.interprov && (en.km || 0) <= 15));
+// Estrellas del repartidor: ★ 4.8 (12)
+const promEstrellas = r => r && r.estrellasN ? Math.round(r.estrellasSum / r.estrellasN * 10) / 10 : null;
+const estrellasTxt = (prom, n) => prom ? `★ ${prom.toFixed(1)}${n ? ` (${n})` : ""}` : "Nuevo";
+const tokenRastreo = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), b => "abcdefghijkmnopqrstuvwxyz23456789"[b % 33]).join("");
 const detItem = i => [i.opts, i.extras ? "Extras: " + i.extras : "", i.nota ? "Nota: " + i.nota : ""].filter(Boolean);

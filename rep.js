@@ -5,6 +5,16 @@
    Paga a Apamuy el % de lo que gana cada día; si no paga, se bloquea.
    ========================================================= */
 let YO = null, REP = null, TAB = "pedidos", ACT = [], OFS = [], POS = null, PAGOS = [], GAN = { dias: [], deuda: [], hoy: null };
+let ACTP = [], ACTE = [], ENVS = [], REPP = null, PRIV = {}, MISOF = store.get("am_misof", {});   // pedidos y envíos en curso, envíos libres, mi perfil público
+const BUSQ_MIN = 10;
+// Lo que ve el cliente del repartidor: foto aprobada, nombre corto, vehículo, placa y estrellas. Nunca DNI ni domicilio.
+const pubRep = () => ({ uid: YO.uid, nombre: REP.nombre.split(" ").slice(0, 2).join(" "), celular: REP.celular, foto: (REPP && REPP.foto) || "", vehiculo: REP.vehiculo, marca: REP.marca || "", color: REP.color || "", placa: REP.placa || "",
+  entregas: (REPP && REPP.entregas) || 0, estrellas: promEstrellas(REPP), nCal: (REPP && REPP.estrellasN) || 0 });
+const colDe = x => x._t === "e" ? "envios" : "pedidos";
+function juntarAct() { ACT = [...ACTP, ...ACTE].sort((a, b) => String(a.repartidor?.tomado || a.asignadoEn).localeCompare(b.repartidor?.tomado || b.asignadoEn)); despierto(true); gps(); syncRastreos(); if (TAB === "pedidos") pintarPedidos(true); }
+// El enlace «Compartir ruta» del cliente se mantiene al día con el estado y el repartidor
+function syncRastreos() { ACT.forEach(x => { if (!x.rastreo) return; const sig = x.estado + "|" + YO.uid, k = "am_rs_" + x.id; if (store.get(k, "") === sig) return; store.set(k, sig);
+  DB.set("rastreo", x.rastreo, { estado: x.estado, repartidor: pubRep(), ...(POS ? { ubic: { ...POS, t: ahora() } } : {}) }).catch(e => console.warn("rastreo", e.code || e)); }); }
 const MAX_ACT = 2;                  // pedidos a la vez
 const ACTIVOS_R = ["nuevo", "cocina", "listo", "camino"];
 const pctRep = () => +CONF.rep.comision || 0;
@@ -36,6 +46,7 @@ function pantallaEntrar() {
     <div class="e-b">${DEMO ? `<div class="demo-n"><b>MODO DEMO</b> · elige con qué cuenta probar:</div>${[["rep-juan", "Juan · moto (activo)"], ["rep-carlos", "Carlos · carro (debe su 10 %)"], ["rep-ana", "Ana · bici (en revisión)"], ["rep-nuevo", "Repartidor nuevo (registrarse)"]].map(([u, t]) => `<button class="btn btn-light btn-lg" data-demo="${u}">${t}</button>`).join("")}`
       : `<button class="btn btn-google btn-lg" id="eG"><svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3l5.7-5.7C34.1 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3l5.7-5.7C34.1 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>Entrar con Google</button>
         <p class="muted sm">Entra con tu cuenta de Google. Si es tu primera vez, te pedimos tus datos para registrarte.</p><p class="l-err" id="eErr" role="alert"></p>`}</div></main>`;
+  barraInstalar();
   if (DEMO) return $$("[data-demo]").forEach(b => b.onclick = () => Sesion._demo({ uid: b.dataset.demo, email: b.dataset.demo + "@demo.pe", nombre: "" }));
   $("#eG").onclick = async () => { $("#eErr").textContent = ""; try { await Sesion.google(); } catch (e) { $("#eErr").textContent = errorAuth(e); } };
 }
@@ -45,7 +56,7 @@ const PASOS_R = ["Tus datos", "Tu DNI", "Vehículo", "Antecedentes", "Domicilio"
 function registro(prev) {
   const R = prev ? JSON.parse(JSON.stringify(prev)) : { nombre: YO.nombre || "", celular: "", departamento: CONF.ciudadInicial.dep, provincia: CONF.ciudadInicial.prov, talla: "M", vehiculo: "moto", domicilio: null, casaca: {} };
   // Archivos: data:… (nuevo) o la ruta que ya estaba guardada
-  const A = { foto: R.foto || "", dniFrente: R.dniFrente || "", dniReverso: R.dniReverso || "", licenciaFoto: R.licenciaFoto || "", soatFoto: R.soatFoto || "", vehiculoFoto: R.vehiculoFoto || "", antecedentes: R.antecedentes || "", casacaCap: (R.casaca || {}).captura || "" };
+  const A = { fotoPerfil: R.fotoPerfil || "", dniFrente: R.dniFrente || "", dniReverso: R.dniReverso || "", licenciaFoto: R.licenciaFoto || "", soatFoto: R.soatFoto || "", vehiculoFoto: R.vehiculoFoto || "", antecedentes: R.antecedentes || "", casacaCap: (R.casaca || {}).captura || "" };
   let paso = 0, firma = null, MP = null;
   document.body.innerHTML = `<header class="r-h"><img src="favicon.svg" alt="" width="34" height="34"><div><b>Registro de repartidor</b><small id="rPaso"></small></div><button class="btn btn-light btn-sm" id="rSalir">Salir</button></header>
     <div class="r-prog"><i id="rBar"></i></div>${prev && prev.motivo ? `<div class="alert bad r-al">⚠️ <span><b>Corrige esto:</b> ${esc(prev.motivo)}</span></div>` : ""}
@@ -65,9 +76,11 @@ function registro(prev) {
       ${fld("celular", "Celular (WhatsApp)", R.celular, { type: "tel", req: true, extra: 'inputmode="numeric" maxlength="9"' })}${fld("talla", "Talla de tu casaca", R.talla, { opts: ["S", "M", "L", "XL", "XXL"] })}
       <label class="fld"><span>Departamento donde trabajarás</span><select name="departamento" id="rDep">${op(Object.keys(U).sort(), R.departamento)}</select></label><label class="fld"><span>Provincia (ciudad)</span><select name="provincia" id="rProv"></select></label></div>
       <p class="muted sm">Te llegan los pedidos de los negocios de esa ciudad.</p>`;
-    if (paso === 1) C.innerHTML = `<h2>🪪 Verificamos que eres tú</h2><p class="muted">Fotos claras, con buena luz y sin reflejos. Solo el administrador de Apamuy las ve.</p>
-      ${foto("foto", "Selfie (foto de tu cara)", "Sin lentes oscuros ni gorra.", "user")}${foto("dniFrente", "DNI · parte de adelante", "Que se lean tu nombre y número.")}${foto("dniReverso", "DNI · parte de atrás", "Que se lea tu dirección.")}`;
+    if (paso === 1) C.innerHTML = `<h2>🪪 Tu foto y tu DNI</h2><p class="muted">Fotos claras, con buena luz y sin reflejos.</p>
+      ${foto("fotoPerfil", "Foto de perfil · la verán los clientes", "De frente, con buena luz, sin lentes oscuros ni gorra. Así te reconocen al entregar.", "user")}
+      <p class="muted sm">🔒 Las fotos de tu DNI solo las ve el administrador de Apamuy.</p>${foto("dniFrente", "DNI · parte de adelante", "Que se lean tu nombre y número.")}${foto("dniReverso", "DNI · parte de atrás", "Que se lea tu dirección.")}`;
     if (paso === 2) C.innerHTML = `<h2>🛵 ¿Con qué vas a repartir?</h2><div class="veh">${Object.entries(VEHIC).map(([k, [e, t]]) => `<label class="veh-c"><input type="radio" name="vehiculo" value="${k}" ${R.vehiculo === k ? "checked" : ""}><span>${e}</span><b>${t}${k === "moto" ? " propia" : ""}</b><small>${{ moto: "Pedidos normales y pequeños de ferretería", bici: "Pedidos normales, distancias cortas", carro: "Pedidos normales y grandes (ferreterías y talleres)" }[k]}</small></label>`).join("")}</div>
+      <div class="g2">${fld("marca", "Marca y modelo", R.marca || "", { ph: "Ej. Honda CB 125" })}${fld("color", "Color", R.color || "", { req: true, ph: "Ej. Rojo" })}</div>
       <div id="rMot"><div class="g2">${fld("placa", "Placa", R.placa || "", { req: true, ph: "Ej. 1234-4A" })}${fld("licencia", "N° de licencia de conducir", R.licencia || "", { req: true })}${fld("soatVence", "El SOAT vence el", R.soatVence || "", { type: "date", req: true })}</div>
         ${foto("soatFoto", "SOAT vigente", "Foto del certificado o de la página del SOAT electrónico.")}${foto("licenciaFoto", "Licencia de conducir", "La parte donde sale tu foto y la categoría.")}</div>
       ${foto("vehiculoFoto", "Foto de tu vehículo", "Que se vea completo (y la placa si tiene).")}`;
@@ -94,10 +107,10 @@ function registro(prev) {
   const ligar = () => {
     $$("[data-f]", F).forEach(i => i.onchange = async e => { const f = e.target.files[0], k = e.target.dataset.f; if (!f) return;
       if (f.type === "application/pdf") { if (f.size > 4 * 1024 * 1024) return toast("El PDF pesa más de 4 MB", true); A[k] = await leerArchivo(f); }
-      else A[k] = await redimensionar(f, k === "foto" ? 900 : 1400, .8);
+      else A[k] = await redimensionar(f, k === "fotoPerfil" ? 700 : 1400, .8);
       guardar(); pintar(); });
     if (paso === 0) { const U = window.UBIGEO || {}, dep = $("#rDep"), pv = () => { const ps = Object.keys(U[dep.value] || {}).sort(); $("#rProv").innerHTML = ps.map(x => `<option ${x === R.provincia ? "selected" : ""}>${esc(x)}</option>`).join(""); }; pv(); dep.onchange = pv; }
-    if (paso === 2) { const v = () => { const r = ($("[name=vehiculo]:checked", F) || {}).value; $("#rMot").hidden = r === "bici"; $$("#rMot [required]").forEach(x => x.disabled = r === "bici"); }; $$("[name=vehiculo]", F).forEach(x => x.onchange = v); v(); }
+    if (paso === 2) { const v = () => { const r = ($("[name=vehiculo]:checked", F) || {}).value; $("#rMot").hidden = r === "bici"; $$("#rMot [required]").forEach(x => x.disabled = r === "bici"); $("[name=marca]", F).closest("label").hidden = r === "bici"; }; $$("[name=vehiculo]", F).forEach(x => x.onchange = v); v(); }
     if (paso === 4) { const dom = R.domicilio || {};
       mapaPin($("#rMapa"), dom.lat != null ? dom : centroDe(R.departamento, R.provincia), q => R.domicilio = { ...(R.domicilio || {}), lat: q.lat, lng: q.lng }, { txt: "🏠" }).then(m => MP = m);
       $("#rGps").onclick = async () => { $("#rGps").disabled = true; try { const p = await miUbicacion(); MP && MP.mover(p); toast("Listo · revisa que el pin esté en tu casa"); } catch (e) { toast("Activa el GPS y da permiso de ubicación", true); } $("#rGps").disabled = false; }; }
@@ -107,7 +120,7 @@ function registro(prev) {
   // Guarda lo escrito en R antes de cambiar de paso
   const guardar = () => { const d = datosForm(F);
     if (paso === 0) Object.assign(R, { nombre: d.nombre, dni: d.dni, nacimiento: d.nacimiento, celular: String(d.celular).replace(/\D/g, ""), talla: d.talla, departamento: d.departamento, provincia: d.provincia });
-    if (paso === 2) Object.assign(R, { vehiculo: d.vehiculo || R.vehiculo, placa: (d.placa || "").toUpperCase(), licencia: (d.licencia || "").toUpperCase(), soatVence: d.soatVence });
+    if (paso === 2) Object.assign(R, { marca: d.vehiculo === "bici" ? "" : d.marca, color: d.color, vehiculo: d.vehiculo || R.vehiculo, placa: (d.placa || "").toUpperCase(), licencia: (d.licencia || "").toUpperCase(), soatVence: d.soatVence });
     if (paso === 4) { R.domicilio = { ...(R.domicilio || {}), texto: d.dir, referencia: d.ref }; const c = R.domicilio.lat != null ? ciudadCercana(R.domicilio) : null; if (c) R.domicilio.distrito = c.dis; }
     if (paso === 5) { R.acepto = d.acepto; R.consentimiento = d.consentimiento; if (firma && !firma.vacia()) R.firmaData = firma.dato(); }
     if (paso === 6) R.casaca = { ...(R.casaca || {}), operacion: d.operacion };
@@ -116,8 +129,8 @@ function registro(prev) {
     const req = $$("[required]:not(:disabled)", F).find(x => !String(x.value).trim()); if (req) { req.focus(); return "Completa: " + req.closest("label").querySelector("span").textContent.replace(" *", ""); }
     if (paso === 0) { if (!/^\d{8}$/.test(R.dni)) return "El DNI tiene 8 números."; if (R.celular.length !== 9) return "El celular tiene 9 números.";
       const ed = (Date.now() - new Date(R.nacimiento + "T12:00:00")) / 31557600000; if (!(ed >= 18)) return "Debes ser mayor de 18 años para repartir."; }
-    if (paso === 1) { if (!A.foto) return "Falta tu selfie."; if (!A.dniFrente || !A.dniReverso) return "Faltan las fotos de tu DNI (adelante y atrás)."; }
-    if (paso === 2) { if (R.vehiculo !== "bici") { if (!A.soatFoto) return "Falta la foto del SOAT."; if (!A.licenciaFoto) return "Falta la foto de tu licencia."; if (R.soatVence < HOY()) return "Tu SOAT está vencido. Necesitas un SOAT vigente."; } if (!A.vehiculoFoto) return "Falta la foto de tu vehículo."; }
+    if (paso === 1) { if (!A.fotoPerfil) return "Falta tu foto de perfil."; if (!A.dniFrente || !A.dniReverso) return "Faltan las fotos de tu DNI (adelante y atrás)."; }
+    if (paso === 2) { if (R.vehiculo !== "bici" && !R.marca) return "Escribe la marca de tu vehículo."; if (R.vehiculo !== "bici") { if (!A.soatFoto) return "Falta la foto del SOAT."; if (!A.licenciaFoto) return "Falta la foto de tu licencia."; if (R.soatVence < HOY()) return "Tu SOAT está vencido. Necesitas un SOAT vigente."; } if (!A.vehiculoFoto) return "Falta la foto de tu vehículo."; }
     if (paso === 3 && !A.antecedentes) return "Falta tu certificado de antecedentes policiales.";
     if (paso === 4) { if (!R.domicilio || R.domicilio.lat == null) return "Mueve el pin (o usa el GPS) hasta tu casa."; }
     if (paso === 5) { if (!R.firmaData) return "Firma con tu dedo en el recuadro."; if (!R.acepto) return "Marca que aceptas la declaración jurada."; if (!R.consentimiento) return "Marca la autorización de tus datos personales."; }
@@ -130,11 +143,12 @@ function registro(prev) {
     const b = $("#rSig"); b.disabled = true; b.textContent = "Enviando… no cierres";
     try {
       const t = Date.now().toString(36), sub = (k, ext) => subirPrivado(`repartidores/${YO.uid}/${k}-${t}.${ext}`, A[k]), ext = k => String(A[k]).startsWith("data:application/pdf") ? "pdf" : "jpg";
-      const up = {}; for (const k of ["foto", "dniFrente", "dniReverso", "vehiculoFoto", "antecedentes", ...(R.vehiculo !== "bici" ? ["soatFoto", "licenciaFoto"] : [])]) up[k] = await sub(k, ext(k));
+      const up = {}; for (const k of ["dniFrente", "dniReverso", "vehiculoFoto", "antecedentes", ...(R.vehiculo !== "bici" ? ["soatFoto", "licenciaFoto"] : [])]) up[k] = await sub(k, ext(k));
+      const fotoPerfil = await subirFoto(`perfiles/${YO.uid}/foto-${t}.jpg`, A.fotoPerfil);
       const firmaR = await subirPrivado(`repartidores/${YO.uid}/firma-${t}.png`, R.firmaData), cap = await sub("casacaCap", "jpg");
       const c = ciudadCercana(R.domicilio) || {};
       const data = { nombre: R.nombre, dni: R.dni, nacimiento: R.nacimiento, celular: R.celular, email: YO.email, talla: R.talla, departamento: R.departamento, provincia: R.provincia, prov: provKey(R.departamento, R.provincia),
-        vehiculo: R.vehiculo, placa: R.vehiculo === "bici" ? "" : R.placa, licencia: R.vehiculo === "bici" ? "" : R.licencia, soatVence: R.vehiculo === "bici" ? "" : R.soatVence, ...up,
+        vehiculo: R.vehiculo, marca: R.marca || "", color: R.color || "", fotoPerfil, placa: R.vehiculo === "bici" ? "" : R.placa, licencia: R.vehiculo === "bici" ? "" : R.licencia, soatVence: R.vehiculo === "bici" ? "" : R.soatVence, ...up,
         domicilio: { texto: R.domicilio.texto, referencia: R.domicilio.referencia || "", lat: R.domicilio.lat, lng: R.domicilio.lng, distrito: R.domicilio.distrito || c.dis || "" },
         firma: firmaR, declaracion: { version: 1, fecha: ahora(), comision: pctRep() }, consentimiento: true, casaca: { monto: +CONF.rep.casaca, operacion: R.casaca.operacion, captura: cap, talla: R.talla },
         estado: "pendiente", disponible: false, actualizado: ahora() };
@@ -163,7 +177,7 @@ function enRevision() {
   document.body.innerHTML = `<main class="centro">${{ pendiente: `<span class="big">⏳</span><h1>Estamos revisando tu registro</h1><p>Revisamos tus documentos y tu pago de la casaca (normalmente en menos de 24 horas). Esta pantalla cambia sola cuando te aprobemos.</p>`,
       rechazado: `<span class="big">⚠️</span><h1>Necesitamos que corrijas algo</h1><div class="alert bad">${esc(REP.motivo || "Revisa tus datos.")}</div><button class="btn btn-pri btn-lg" id="corr">Corregir mis datos</button>`,
       suspendido: `<span class="big">⛔</span><h1>Tu cuenta está suspendida</h1><div class="alert bad">${esc(REP.motivo || "Comunícate con Apamuy.")}</div><button class="btn btn-pri btn-lg" id="pagD">Ver lo que debo y pagar</button>` }[e] || `<h1>${esc(e)}</h1>`}
-    ${sop}<button class="btn-link" id="sx">Salir</button></main>`;
+    ${sop}<button class="btn-link" id="sx">Salir</button></main>`; barraInstalar();
   $("#sx").onclick = () => Sesion.salir(); $("#corr")?.addEventListener("click", () => registro(REP));
   $("#pagD")?.addEventListener("click", async () => { await cargarGanancias(); pagar(); });
   DB.escuchar("repartidores", YO.uid, r => { if (r && r.estado !== e) location.reload(); });
@@ -174,15 +188,25 @@ function app() {
   document.body.innerHTML = `<header class="a-h"><img src="favicon.svg" alt="" width="34" height="34"><div class="a-n"><b>${esc(REP.nombre.split(" ")[0])}</b><small>${vehTxt(REP.vehiculo)}${REP.placa ? " · " + esc(REP.placa) : ""}</small></div>
       <label class="disp"><input type="checkbox" id="disp" ${REP.disponible ? "checked" : ""}><i></i><span id="dispT"></span></label></header>
     <div id="aviso"></div><main id="v" class="a-v"></main>
-    <nav class="a-nav">${[["pedidos", "🛵", "Pedidos"], ["ganancias", "💵", "Ganancias"], ["perfil", "👤", "Perfil"]].map(([k, e, t]) => `<button data-t="${k}"><span>${e}</span>${t}</button>`).join("")}</nav>`;
+    <nav class="a-nav">${[["pedidos", '<circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/><path d="M15 6h3l-3 11.5M5.5 17.5 9 10h7M12 6h2"/>', "Pedidos"], ["ganancias", '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>', "Ganancias"], ["perfil", '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>', "Perfil"]].map(([k, e, t]) => `<button data-t="${k}"><span><svg class="iw" viewBox="0 0 24 24" aria-hidden="true">${e}</svg></span>${t}</button>`).join("")}</nav>`;
+  barraInstalar(); if (!REP.fotoPerfil && !REP.fotoNueva) $("#aviso").insertAdjacentHTML("afterend", `<div class="alert warn a-foto">📸 <span><b>Sube tu foto de perfil</b>: los clientes la ven al recibir su pedido.</span><button class="btn btn-light btn-sm" id="avFoto">Subir</button></div>`);
+  $("#avFoto")?.addEventListener("click", cambiarFoto);
   $(".a-nav").onclick = e => { const b = e.target.closest("[data-t]"); if (b) { TAB = b.dataset.t; pintarTab(); } };
   $("#disp").onchange = e => cambiarDisp(e.target.checked);
   DB.escuchar("repartidores", YO.uid, r => { if (!r) return; if (r.estado !== "activo") return location.reload(); REP = r; });
+  DB.escuchar("repPublico", YO.uid, r => { REPP = r; });
+  // Mis envíos de paquetes en curso
+  DB.escucharLista("envios", [["repUid", "==", YO.uid], ["estado", "in", ["asignado", "camino"]]], async l => {
+    for (const e of l) if (!PRIV[e.id]) PRIV[e.id] = await DB.get(`envios/${e.id}/priv`, "datos").catch(() => null);
+    const nuevos = l.filter(e => !ACTE.find(x => x.id === e.id) && e.estado === "asignado" && MISOF[e.id]);
+    if (nuevos.length) avisar("✅ ¡Te eligieron!", `Envío ${nuevos[0].codigo} por ${S(nuevos[0].precio)}`);
+    ACTE = l.map(e => ({ ...e, _t: "e" })); juntarAct();
+  });
   // Mis pedidos en curso
   let antes = null;
   DB.escucharLista("pedidos", [["repUid", "==", YO.uid], ["estado", "in", ACTIVOS_R]], l => {
     if (antes) antes.filter(a => !l.find(p => p.id === a.id)).forEach(a => DB.get("pedidos", a.id).then(p => { if (p && p.estado === "anulado") { avisar("Pedido anulado", `${p.negocio.nombre} anuló el pedido ${p.codigo}.`); } }).catch(() => {}));
-    antes = l; ACT = l.sort((a, b) => String(a.repartidor?.tomado).localeCompare(b.repartidor?.tomado)); despierto(true); gps(); if (TAB === "pedidos") pintarPedidos(true);
+    antes = l; ACTP = l; juntarAct();
   });
   cargarGanancias().then(() => { estadoDisp(); pintarTab(); });
   pintarTab(); estadoDisp();
@@ -210,9 +234,17 @@ async function cambiarDisp(on) {
 
 /* ---------- Ofertas: pedidos libres de mi ciudad ---------- */
 let PARAR_OF = null, VISTOS = null;
+let PARAR_EN = null, VISTOS_E = null;
 function escucharOfertas(on) {
-  if (!on) { if (PARAR_OF) { PARAR_OF(); PARAR_OF = null; } OFS = []; VISTOS = null; return; }
+  if (!on) { if (PARAR_OF) { PARAR_OF(); PARAR_OF = null; } if (PARAR_EN) { PARAR_EN(); PARAR_EN = null; } OFS = []; ENVS = []; VISTOS = VISTOS_E = null; return; }
   if (PARAR_OF) return;
+  PARAR_EN = DB.escucharLista("envios", [["prov", "==", REP.prov], ["estado", "==", "buscando"]], l => {
+    const lim = Date.now() - BUSQ_MIN * 60e3;
+    ENVS = l.filter(e => puedeEnvio(e, REP.vehiculo) && new Date(e.buscadoEn) > lim);
+    const nuevas = VISTOS_E ? ENVS.filter(e => !VISTOS_E.has(e.id + e.oferta)) : []; VISTOS_E = new Set(ENVS.map(e => e.id + e.oferta));
+    if (nuevas.length && ACT.length < MAX_ACT) avisar("📦 Envío de paquete", `${nuevas[0].origen.dis} → ${nuevas[0].destino.dis} · ofrecen ${S(nuevas[0].oferta)}`);
+    if (TAB === "pedidos") pintarPedidos(true);
+  });
   PARAR_OF = DB.escucharLista("ofertas", [["prov", "==", REP.prov], ["estado", "==", "libre"]], l => {
     const lim = Date.now() - 3 * 3600e3;
     OFS = l.filter(o => puedeLlevar(o, REP.vehiculo) && new Date(o.creado) > lim);
@@ -237,7 +269,7 @@ function gps() {
 function enviarUbic() {
   const t = Date.now(), u = { ...POS, t: ahora() };
   // Al cliente: cada 10 s si me moví más de 20 m
-  if (ACT.length && t - ULT_ENV > 10000 && (!ULT_POS || distanciaKm(ULT_POS, POS) > .026)) { ULT_ENV = t; ULT_POS = POS; DB.batch(ACT.map(p => ({ op: "set", col: "pedidos", id: p.id, data: { repartidor: { ubic: u } } }))).catch(e => console.warn(e)); }
+  if (ACT.length && t - ULT_ENV > 10000 && (!ULT_POS || distanciaKm(ULT_POS, POS) > .026)) { ULT_ENV = t; ULT_POS = POS; DB.batch([...ACT.map(p => ({ op: "set", col: colDe(p), id: p.id, data: { repartidor: { ubic: u } } })), ...ACT.filter(p => p.rastreo).map(p => ({ op: "set", col: "rastreo", id: p.rastreo, data: { ubic: u } }))]).catch(e => console.warn(e)); }
   if (REP.disponible && t - ULT_REP > 60000) { ULT_REP = t; DB.set("repartidores", YO.uid, { ubic: u }).catch(() => {}); }
 }
 async function despierto(on) { try { if (on && !WL && navigator.wakeLock && !document.hidden) { WL = await navigator.wakeLock.request("screen"); WL.addEventListener("release", () => WL = null); } if (!on && WL) { await WL.release(); WL = null; } } catch (e) {} }
@@ -252,22 +284,33 @@ function pintarPedidos(silencioso) {
   const on = REP.disponible && !bloqueado() && !soatVencido(REP);
   const dist = o => POS && o.negocio.ubic ? distanciaKm(POS, o.negocio.ubic) : null;
   const ofs = OFS.slice().sort((a, b) => (dist(a) ?? 99) - (dist(b) ?? 99));
-  const html = `${ACT.map(tarjetaActiva).join("")}
+  const dE = e => POS ? distanciaKm(POS, e.origen) : null, envs = ENVS.slice().sort((a, b) => (dE(a) ?? 99) - (dE(b) ?? 99));
+  const htmlEnv = on && envs.length ? `<h2 class="a-t">📦 Envíos de paquetes <b>${envs.length}</b></h2>${envs.map(e => { const d = dE(e), mio = MISOF[e.id];
+      return `<article class="of env"><div class="of-h"><b>${esc(TAM[e.tamano]?.[0] || "Paquete")}</b><strong>${S(e.oferta)}</strong></div>
+        <p><span class="lg a">A</span> ${esc(e.origen.dis)}${d != null ? ` · <b>a ${d.toFixed(1)} km de ti</b>` : ""}</p><p><span class="lg b">B</span> ${esc(e.destino.dis)}${e.interprov ? `, ${esc(e.destino.provincia)}` : ""} · ${e.km} km de viaje</p>
+        <div class="tags">${e.interprov ? `<span class="st warn">🚩 Interprovincial</span>` : ""}<span class="st">${esc(e.contenido)}</span><span class="st">${e.paga === "recibe" ? "Paga quien recibe" : "Pagan al recoger"}</span><span class="st mute">${hace(e.buscadoEn)}</span></div>
+        ${mio ? `<div class="alert sm">💬 Mandaste tu contraoferta de <b>${S(mio)}</b>. Si el cliente te elige, te avisamos.</div>` : ""}
+        <div class="of-b"><button class="btn btn-pri" data-tomarE="${esc(e.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>Aceptar ${S(e.oferta)}</button><button class="btn btn-light" data-contra="${esc(e.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>${mio ? "Cambiar precio" : "Contraofertar"}</button></div></article>`; }).join("")}` : "";
+  const html = `${ACT.map(tarjetaActiva).join("")}${htmlEnv}
     ${on ? `<h2 class="a-t">Pedidos cerca de ti ${ofs.length ? `<b>${ofs.length}</b>` : ""}</h2>${ACT.length >= MAX_ACT ? `<div class="alert">ℹ️ <span>Ya llevas ${MAX_ACT} pedidos. Entrega uno para tomar otro.</span></div>` : ""}
       ${ofs.map(o => { const d = dist(o); return `<article class="of ${o.vehiculo === "carro" ? "grande" : ""}"><div class="of-h"><b>${esc(o.negocio.nombre)}</b><strong>${S(o.envio)}</strong></div>
         <p>🏪 ${esc(o.negocio.direccion || "")}${d != null ? ` · <b>a ${d.toFixed(1)} km de ti</b>` : ""}</p><p>🏠 Zona: <b>${esc(o.zona || "—")}</b> · ${o.km ?? "?"} km del negocio al cliente</p>
         <div class="tags">${o.vehiculo === "carro" ? `<span class="st warn">🚗 Envío grande</span>` : o.vehiculo === "moto" ? `<span class="st">🛵 Envío pequeño</span>` : ""}${o.pago === "Efectivo" ? `<span class="st">💵 Efectivo</span>` : `<span class="st ok">Comida pagada (${esc(o.pago)})</span>`}${o.tiempo ? `<span class="st">⏱ Listo en ~${esc(o.tiempo)} min</span>` : ""}<span class="st mute">${hace(o.creado)}</span></div>
-        <button class="btn btn-pri btn-lg" data-tomar="${esc(o.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>Aceptar pedido</button></article>`; }).join("") || `<div class="vacio"><span class="radar"></span><p>Esperando pedidos… te avisaremos con sonido.</p><small>Deja esta pantalla abierta.</small></div>`}`
+        <button class="btn btn-pri btn-lg" data-tomar="${esc(o.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>Aceptar pedido</button></article>`; }).join("") || (envs.length ? `<p class="muted sm">Por ahora no hay pedidos de comida.</p>` : `<div class="vacio"><span class="radar"></span><p>Esperando pedidos… te avisaremos con sonido.</p><small>Deja esta pantalla abierta.</small></div>`)}`
     : !ACT.length ? `<div class="vacio"><span class="big">😴</span><p><b>Estás desconectado</b></p><small>Activa «Disponible» arriba para recibir pedidos.</small></div>` : ""}`;
   if (silencioso && V.dataset.h === html) return;
   V.innerHTML = html; V.dataset.h = html; MAPAS = [];
-  ACT.forEach(p => { const el = $(`#m-${CSS.escape(p.id)}`); if (!el) return; const pts = () => [p.negocio.ubic && { ...p.negocio.ubic, color: "#E63946", txt: "🏪" }, p.destino && { ...p.destino, color: "#1A1430", txt: "🏠" }, POS && { ...POS, color: "#FFC21A", txt: VEHIC[REP.vehiculo]?.[0] || "🛵" }];
+  ACT.forEach(p => { const el = $(`#m-${CSS.escape(p.id)}`); if (!el) return; const yo = () => POS && { ...POS, color: "#FFC21A", txt: VEHIC[REP.vehiculo]?.[0] || "🛵" };
+    const pts = () => p._t === "e" ? [{ ...p.origen, color: "#E63946", txt: "A" }, { ...p.destino, color: "#1A1430", txt: "B" }, yo()] : [p.negocio.ubic && { ...p.negocio.ubic, color: "#E63946", txt: "🏪" }, p.destino && { ...p.destino, color: "#1A1430", txt: "🏠" }, yo()];
     mapaPuntos(el, pts()).then(m => { if (m) MAPAS.push({ mio: () => m.pintar(pts()) }); }); });
-  V.onclick = async e => { const t = e.target.closest("[data-tomar]"), a = e.target.closest("[data-acc]");
+  V.onclick = async e => { const t = e.target.closest("[data-tomar]"), a = e.target.closest("[data-acc]"), te = e.target.closest("[data-tomarE]"), co = e.target.closest("[data-contra]");
     if (t) return tomar(OFS.find(o => o.id === t.dataset.tomar), t);
+    if (te) return tomarEnvio(ENVS.find(x => x.id === te.dataset.tomare), te);
+    if (co) return contraofertar(ENVS.find(x => x.id === co.dataset.contra));
     if (a) { const [acc, id] = a.dataset.acc.split("|"); accion(acc, ACT.find(p => p.id === id)); } };
 }
 function tarjetaActiva(p) {
+  if (p._t === "e") return tarjetaEnvio(p);
   const r = p.repartidor || {}, recogido = p.estado === "camino", ef = p.pago === "Efectivo" && !p.pagado, cobrar = ef ? p.total : p.envio;
   const B = (a, t, c = "btn-light") => `<button class="btn ${c}" data-acc="${a}|${esc(p.id)}">${t}</button>`;
   return `<article class="act"><div class="act-h"><span class="st ${recogido ? "info" : "fire"}">${recogido ? "🛵 En camino al cliente" : p.estado === "listo" ? "✅ Listo para recoger" : `🔥 Preparando${p.tiempo ? ` (~${esc(p.tiempo)} min)` : ""}`}</span><span class="mono">${esc(p.codigo)}</span></div>
@@ -289,7 +332,7 @@ async function tomar(o, btn) {
     const ok = await DB.transaccion(async (get, set) => {
       const x = await get("ofertas", o.id); if (!x || x.estado !== "libre") return false;
       set("ofertas", o.id, { estado: "tomado", tomadoPor: YO.uid, tomado: ahora() });
-      set("pedidos", o.id, { repUid: YO.uid, repartidor: { uid: YO.uid, nombre: REP.nombre, celular: REP.celular, vehiculo: REP.vehiculo, placa: REP.placa || "", etapa: "yendo", tomado: ahora(), ...(POS ? { ubic: { ...POS, t: ahora() } } : {}) }, actualizado: ahora() });
+      set("pedidos", o.id, { repUid: YO.uid, repartidor: { ...pubRep(), etapa: "yendo", tomado: ahora(), ...(POS ? { ubic: { ...POS, t: ahora() } } : {}) }, actualizado: ahora() });
       return true;
     });
     if (!ok) { toast("Otro repartidor lo tomó primero 😅", true); OFS = OFS.filter(x => x.id !== o.id); return pintarPedidos(); }
@@ -297,7 +340,7 @@ async function tomar(o, btn) {
   } catch (e) { console.error(e); toast("No se pudo aceptar: " + (e.code || e.message), true); btn.disabled = false; btn.textContent = "Aceptar pedido"; }
 }
 async function accion(a, p) {
-  if (!p) return; const upd = d => DB.set("pedidos", p.id, { ...d, actualizado: ahora() });
+  if (!p) return; if (p._t === "e") return accionEnvio(a, p); const upd = d => DB.set("pedidos", p.id, { ...d, actualizado: ahora() });
   if (a === "recoger") {
     const ef = p.pago === "Efectivo" && !p.pagado;
     return modal("¿Ya tienes el pedido?", `<p>Revisa que esté <b>completo</b> (${(p.items || []).map(i => `${i.cant}× ${esc(i.n)}`).join(", ")}).</p>${p.estado === "cocina" ? `<div class="alert warn sm">El negocio aún lo marca como «preparando». Recógelo solo si ya te lo entregaron.</div>` : ""}
@@ -306,7 +349,7 @@ async function accion(a, p) {
   }
   if (a === "entregar") { const ef = p.pago === "Efectivo" && !p.pagado;
     return modal("¿Entregaste el pedido?", `<p>Confirma que el cliente recibió su pedido y que cobraste <b>${S(ef ? p.total : p.envio)}</b>${ef ? " (comida + delivery)" : " (tu delivery)"}.</p>`, async () => {
-      await upd({ estado: "entregado", entregado: ahora(), repartidor: { etapa: "entregado", entregado: ahora() } }); toast(`🎉 ¡Bien! Ganaste ${S(p.envio)}`); cargarGanancias(); }, "Sí, entregado"); }
+      await upd({ estado: "entregado", entregado: ahora(), repartidor: { etapa: "entregado", entregado: ahora() } }); sumarEntrega(); toast(`🎉 ¡Bien! Ganaste ${S(p.envio)}`); cargarGanancias(); }, "Sí, entregado"); }
   if (a === "soltar") return modal("¿No puedes llevarlo?", `<p>El pedido vuelve a la lista para que otro repartidor lo tome. Hazlo solo si de verdad no puedes.</p>`, async () => {
     await DB.batch([{ op: "set", col: "ofertas", id: p.id, data: { estado: "libre", tomadoPor: null, soltadoPor: YO.uid } }, { op: "set", col: "pedidos", id: p.id, data: { repUid: null, repartidor: null, actualizado: ahora() }, merge: true }]);
     toast("Pedido liberado"); }, "Soltar pedido");
@@ -315,10 +358,11 @@ async function accion(a, p) {
 /* ---------- Ganancias y pago del % a Apamuy ---------- */
 async function cargarGanancias() {
   const m = HOY().slice(0, 7), mp = addD(m + "-01", -1).slice(0, 7);
-  const [a, b, pg] = await Promise.all([DB.list("pedidos", ["repUid", "==", YO.uid], ["mes", "==", m]), DB.list("pedidos", ["repUid", "==", YO.uid], ["mes", "==", mp]), DB.list("pagosRep", ["uid", "==", YO.uid])]).catch(e => { console.warn(e); return [[], [], []]; });
+  const [a, b, pg, ea, eb] = await Promise.all([DB.list("pedidos", ["repUid", "==", YO.uid], ["mes", "==", m]), DB.list("pedidos", ["repUid", "==", YO.uid], ["mes", "==", mp]), DB.list("pagosRep", ["uid", "==", YO.uid]),
+    DB.list("envios", ["repUid", "==", YO.uid], ["mes", "==", m]).catch(() => []), DB.list("envios", ["repUid", "==", YO.uid], ["mes", "==", mp]).catch(() => [])]).catch(e => { console.warn(e); return [[], [], [], [], []]; });
   PAGOS = pg.sort((x, y) => String(y.creado).localeCompare(x.creado));
   const cub = {}; PAGOS.filter(x => x.estado !== "rechazado").forEach(x => (x.dias || []).forEach(d => cub[d] = x.estado));
-  const D = {}; [...a, ...b].filter(p => p.estado === "entregado").forEach(p => { const r = D[p.dia] || (D[p.dia] = { dia: p.dia, n: 0, gan: 0 }); r.n++; r.gan += +p.envio || 0; });
+  const D = {}; [...a, ...b, ...[...ea, ...eb].map(e => ({ ...e, envio: e.precio }))].filter(p => p.estado === "entregado").forEach(p => { const r = D[p.dia] || (D[p.dia] = { dia: p.dia, n: 0, gan: 0 }); r.n++; r.gan += +p.envio || 0; });
   GAN.dias = Object.values(D).map(r => ({ ...r, gan: r2(r.gan), com: r2(r.gan * pctRep() / 100), pago: cub[r.dia] || null })).sort((x, y) => y.dia.localeCompare(x.dia));
   GAN.deuda = GAN.dias.filter(r => r.dia < HOY() && r.com > 0 && !r.pago);
   GAN.hoy = GAN.dias.find(r => r.dia === HOY()) || { dia: HOY(), n: 0, gan: 0, com: 0 };
@@ -359,7 +403,10 @@ function pagar() {
 /* ---------- Perfil ---------- */
 async function pintarPerfil() {
   const r = REP, ios = /iphone|ipad|ipod/i.test(navigator.userAgent), app = matchMedia("(display-mode: standalone)").matches;
-  $("#v").innerHTML = `<section class="card perfil"><span class="pf-f" id="pfF">👤</span><div><h2>${esc(r.nombre)}</h2><p class="muted">DNI ${esc(r.dni)} · ${esc(r.celular)}<br>${esc(r.provincia)} (${esc(r.departamento)})</p></div></section>
+  const pub = pubRep(), prom = promEstrellas(REPP);
+  $("#v").innerHTML = `<section class="card perfil"><span class="pf-f" style="${pub.foto ? `background-image:url('${esc(pub.foto)}')` : ""}">${pub.foto ? "" : "👤"}</span><div><h2>${esc(r.nombre)}</h2><p class="muted">DNI ${esc(r.dni)} · ${esc(r.celular)}<br>${esc(r.provincia)} (${esc(r.departamento)})</p></div></section>
+    <section class="card pub"><h2>Así te ven los clientes</h2><div class="pub-c"><span class="pf-f sm" style="${pub.foto ? `background-image:url('${esc(pub.foto)}')` : ""}">${pub.foto ? "" : esc(pub.nombre[0])}</span><div><b>${esc(pub.nombre)}</b><span>${prom ? `<em>★ ${prom.toFixed(1)}</em> (${REPP.estrellasN})` : `<em>Nuevo</em>`} · ${pub.entregas} entregas</span><small>${esc([vehTxt(r.vehiculo), r.marca, r.color].filter(Boolean).join(" · "))}</small></div>${r.placa ? `<span class="placa">${esc(r.placa)}</span>` : ""}</div>
+      ${r.fotoNueva ? `<div class="alert warn sm">⏳ Tu foto nueva está en revisión. La verán los clientes cuando la aprobemos.</div>` : ""}<button class="btn btn-light" id="pfFoto">📸 ${pub.foto ? "Cambiar mi foto" : "Subir mi foto de perfil"}</button></section>
     <section class="card"><h2>${vehTxt(r.vehiculo)}</h2><dl class="dl">${r.placa ? `<dt>Placa</dt><dd>${esc(r.placa)}</dd><dt>Licencia</dt><dd>${esc(r.licencia || "")}</dd><dt>SOAT</dt><dd>${soatVencido(r) ? `<span class="st bad">Vencido</span>` : "vence"} ${fmtF(r.soatVence, { day: "numeric", month: "short", year: "numeric" })}</dd>` : `<dt>Tipo</dt><dd>Bicicleta</dd>`}</dl>
       ${r.placa ? `<button class="btn btn-light" id="pfSoat">Actualizar mi SOAT</button>` : ""}</section>
     <section class="card"><h2>📲 Para no perder pedidos</h2><ul class="tips"><li>${app ? "✅ Ya usas la app instalada." : ios ? "Instálala: toca <b>Compartir</b> ⬆️ → <b>Agregar a inicio</b>." : "Instálala: menú ⋮ de Chrome → <b>Instalar app</b> (o «Agregar a la pantalla principal»)."}</li>
@@ -375,5 +422,75 @@ async function pintarPerfil() {
       const soatFoto = await subirPrivado(`repartidores/${YO.uid}/soatFoto-${Date.now().toString(36)}.jpg`, F2);
       await DB.set("repartidores", YO.uid, { soatVence: d.soatVence, soatFoto, soatActualizado: ahora() }); REP = { ...REP, soatVence: d.soatVence }; toast("SOAT actualizado"); estadoDisp(); pintarPerfil(); }, "Guardar", { alAbrir: () => {
       $("#sF").onchange = async e => { const f = e.target.files[0]; if (!f) return; F2 = await redimensionar(f, 1400, .8); $("#sV").textContent = ""; $("#sV").style.backgroundImage = `url('${F2}')`; }; } }); });
-  verPrivado(r.foto).then(u => { if (u && $("#pfF")) { $("#pfF").textContent = ""; $("#pfF").style.backgroundImage = `url('${u}')`; } }).catch(() => {});
+  $("#pfFoto").onclick = cambiarFoto;
+}
+
+/* ---------- Envíos de paquetes: aceptar, contraofertar y llevar ---------- */
+async function tomarEnvio(e, btn) {
+  if (!e) return; if (ACT.length >= MAX_ACT) return toast(`Entrega uno de tus ${MAX_ACT} pedidos primero`, true);
+  btn.disabled = true; btn.textContent = "Aceptando…";
+  try {
+    const ok = await DB.transaccion(async (get, set) => { const x = await get("envios", e.id); if (!x || x.estado !== "buscando") return false;
+      set("envios", e.id, { estado: "asignado", repUid: YO.uid, repartidor: { ...pubRep(), tomado: ahora(), ...(POS ? { ubic: { ...POS, t: ahora() } } : {}) }, precio: x.oferta, asignadoEn: ahora(), actualizado: ahora() }); return x.oferta; });
+    if (ok === false) { toast("Otro repartidor lo tomó primero 😅", true); ENVS = ENVS.filter(x => x.id !== e.id); return pintarPedidos(); }
+    beep(1); toast(`✅ ¡Es tuyo por ${S(ok)}! Ve a recoger el paquete`); scrollTo(0, 0);
+  } catch (x) { console.error(x); toast("No se pudo aceptar: " + (x.code || x.message), true); btn.disabled = false; btn.textContent = `Aceptar ${S(e.oferta)}`; }
+}
+function contraofertar(e) {
+  if (!e) return; const base = e.oferta, sug = Math.max(base, sugerirEnvio(e.km, e.tamano));
+  modal("Tu precio para este envío", `<p>El cliente ofrece <b>${S(base)}</b> por ${e.km} km${e.interprov ? " (interprovincial)" : ""}. Propón tu precio: el cliente ve tu foto, tus estrellas y tu vehículo, y elige.</p>
+    <div class="chips-p">${[...new Set([base + 1, base + 2, base + 3, base + 5, sug].map(r2))].sort((a, b) => a - b).map(v => `<button type="button" class="btn btn-light" data-pv="${v}">${S(v)}</button>`).join("")}</div>
+    ${fld("precio", "Mi precio (S/)", MISOF[e.id] || r2(base + 2), { type: "number", req: true, extra: `min="${CONF.envio.minimo}" step="0.5" inputmode="decimal"` })}`, async d => {
+    const pr = r2(d.precio); if (!(pr >= CONF.envio.minimo)) { toast(`Mínimo ${S(CONF.envio.minimo)}`, true); return false; } if (pr > 3000) { toast("Ese precio es muy alto", true); return false; }
+    await DB.set(`envios/${e.id}/ofertas`, YO.uid, { repUid: YO.uid, precio: pr, rep: pubRep(), dist: POS ? r2(distanciaKm(POS, e.origen)) : null, creado: ahora() }, false);
+    MISOF[e.id] = pr; store.set("am_misof", MISOF); toast(`💬 Enviaste ${S(pr)}. Si te elige, te avisamos con sonido`); pintarPedidos(); }, "Enviar mi precio", { alAbrir: F => {
+    F.onclick = ev => { const b = ev.target.closest("[data-pv]"); if (b) $("[name=precio]", F).value = b.dataset.pv; }; } });
+}
+function tarjetaEnvio(e) {
+  const pv = PRIV[e.id] || {}, cli = pv.cliente || {}, rec = pv.receptor || {}, rec2 = e.estado === "camino", B = (a, t, c = "btn-light") => `<button class="btn ${c}" data-acc="${a}|${esc(e.id)}">${t}</button>`;
+  const cobraAqui = (e.paga === "recibe") === rec2, P = rec2 ? e.destino : e.origen, quien = rec2 ? rec : cli;
+  return `<article class="act env"><div class="act-h"><span class="st ${rec2 ? "info" : "fire"}">${rec2 ? "📦 Llevando el paquete" : "📍 Ve a recoger el paquete"}</span><span class="mono">${esc(e.codigo)}</span></div>
+    <div class="mapa act-m" id="m-${esc(e.id)}"></div>
+    <div class="act-b"><h3><span class="lg ${rec2 ? "b" : "a"}">${rec2 ? "B" : "A"}</span> ${rec2 ? "Entregar a" : "Recoger de"} ${esc(quien.nombre || "")}</h3><p>${esc(P.texto)}${P.referencia ? `<br><small>${esc(P.referencia)}</small>` : ""}<br><small>${esc(P.dis)}, ${esc(P.provincia)}</small></p>
+      <div class="acts"><a class="btn btn-acc" href="${nav(P.lat, P.lng)}" target="_blank" rel="noopener">🧭 Cómo llegar</a>${quien.celular ? `<a class="btn btn-light" href="tel:${esc(quien.celular)}">📞 Llamar</a><a class="btn btn-wa" href="${esc(wa(quien.celular, `Hola ${(quien.nombre || "").split(" ")[0]} 👋 soy ${REP.nombre.split(" ")[0]}, repartidor de Apamuy. ${rec2 ? "Estoy en camino con tu paquete." : "Voy a recoger el paquete."}`))}" target="_blank" rel="noopener">WhatsApp</a>` : ""}</div>
+      <p class="muted sm">📦 ${esc(e.contenido)} · ${esc(TAM[e.tamano]?.[0] || "")}${e.interprov ? " · 🚩 interprovincial" : ""}${!rec2 ? ` · entrega en ${esc(e.destino.dis)} (${esc(rec.nombre || "")})` : ""}</p>
+      <div class="cobro ${cobraAqui ? "ef" : ""}">${cobraAqui ? `💵 <b>Cobra ${S(e.precio)} ${rec2 ? "al entregar" : "al recoger"}</b><small>En efectivo o a tu Yape.</small>` : `✅ <b>${rec2 ? "Ya cobraste al recoger." : `Cobras ${S(e.precio)} al entregar.`}</b><small>${rec2 ? "Solo entrega el paquete." : "Paga quien recibe."}</small>`}</div>
+      <div class="acts">${rec2 ? B("entregarE", `✅ Entregado · ${S(e.precio)}`, "btn-pri btn-lg") : B("recogerE", "📦 Ya recogí el paquete", "btn-pri btn-lg") + B("soltarE", "No puedo llevarlo")}</div></div></article>`;
+}
+async function accionEnvio(a, e) {
+  const upd = d => DB.set("envios", e.id, { ...d, actualizado: ahora() });
+  if (a === "recogerE") return modal("¿Ya tienes el paquete?", `<p>Revisa que sea <b>${esc(e.contenido)}</b> y que esté bien cerrado.${e.paga === "envia" ? ` Cobra <b>${S(e.precio)}</b> ahora.` : ""}</p>`, async () => {
+    await upd({ estado: "camino", recogido: ahora(), repartidor: { etapa: "camino" } }); toast("📦 ¡En camino! Quien recibe te ve en el mapa"); }, "Sí, voy a entregar");
+  if (a === "entregarE") return modal("¿Entregaste el paquete?", `<p>Confirma que <b>${esc((PRIV[e.id]?.receptor || {}).nombre || "quien recibe")}</b> recibió el paquete${e.paga === "recibe" ? ` y te pagó <b>${S(e.precio)}</b>` : ""}.</p>`, async () => {
+    await upd({ estado: "entregado", entregado: ahora(), repartidor: { etapa: "entregado" } }); sumarEntrega(); delete MISOF[e.id]; store.set("am_misof", MISOF); toast(`🎉 ¡Bien! Ganaste ${S(e.precio)}`); cargarGanancias(); }, "Sí, entregado");
+  if (a === "soltarE") return modal("¿No puedes llevarlo?", `<p>El envío vuelve a la lista para que otro repartidor lo tome.</p>`, async () => {
+    await DB.set("envios", e.id, { estado: "buscando", repUid: null, repartidor: null, precio: null, buscadoEn: ahora(), actualizado: ahora() }); toast("Envío liberado"); }, "Soltar envío");
+}
+// Suma 1 a mis entregas (se ve en mi tarjeta pública)
+function sumarEntrega() { if (REPP) DB.set("repPublico", YO.uid, { entregas: (+REPP.entregas || 0) + 1 }).catch(() => {}); }
+
+/* ---------- Barra «Descargar app» ---------- */
+let INST = null;
+window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); INST = e; barraInstalar(); });
+const esApp = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+function barraInstalar() {
+  if (esApp() || $("#instB") || store.get("am_noinst", 0) > Date.now()) return;
+  document.body.insertAdjacentHTML("afterbegin", `<div class="inst" id="instB"><img src="img/icon-192.png" alt="" width="40" height="40"><div><b>Apamuy Reparto</b><small>Descarga la app: más fácil y no te pierdes pedidos</small></div><button class="btn btn-acc btn-sm" id="instOk">Descargar app</button><button class="inst-x" id="instX" aria-label="Cerrar">×</button></div>`);
+  $("#instX").onclick = () => { $("#instB").remove(); store.set("am_noinst", Date.now() + 3 * 864e5); };
+  $("#instOk").onclick = instalarApp;
+}
+async function instalarApp() {
+  if (INST) { INST.prompt(); const r = await INST.userChoice; INST = null; if (r.outcome === "accepted") $("#instB")?.remove(); return; }
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  modal("Descargar la app", ios ? `<ol class="pasos-i"><li>Abre esta página en <b>Safari</b>.</li><li>Toca <b>Compartir</b> (el cuadrado con la flecha ↑).</li><li>Elige <b>«Agregar a inicio»</b> → <b>Agregar</b>.</li><li>Abre <b>Apamuy Reparto</b> desde el ícono nuevo.</li></ol>`
+    : `<ol class="pasos-i"><li>Abre esta página en <b>Chrome</b>.</li><li>Toca el menú <b>⋮</b> arriba a la derecha.</li><li>Elige <b>«Instalar app»</b> o «Agregar a la pantalla principal».</li><li>Abre <b>Apamuy Reparto</b> desde el ícono nuevo.</li></ol>`, null);
+}
+
+// Foto de perfil nueva: queda en revisión hasta que el admin la apruebe
+function cambiarFoto() { let F2 = "";
+  modal("Tu foto de perfil", `<p class="muted">De frente, con buena luz, sin lentes oscuros ni gorra. La revisamos antes de que la vean los clientes.</p><div class="up"><span class="up-v" id="cfV">📷</span><div><b>Foto de perfil</b><label class="btn btn-light btn-sm">Tomar / subir foto<input type="file" accept="image/*" capture="user" id="cfF" hidden></label></div></div>`, async () => {
+    if (!F2) { toast("Elige una foto", true); return false; }
+    const u = await subirFoto(`perfiles/${YO.uid}/foto-${Date.now().toString(36)}.jpg`, F2);
+    await DB.set("repartidores", YO.uid, { fotoNueva: u, fotoNuevaEn: ahora() }); REP.fotoNueva = u; $(".a-foto")?.remove(); toast("📸 Foto enviada para revisión"); if (TAB === "perfil") pintarPerfil(); }, "Enviar foto", { alAbrir: () => {
+    $("#cfF").onchange = async e => { const f = e.target.files[0]; if (!f) return; F2 = await redimensionar(f, 700, .8); $("#cfV").textContent = ""; $("#cfV").style.backgroundImage = `url('${F2}')`; }; } });
 }
