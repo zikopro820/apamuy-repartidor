@@ -263,7 +263,7 @@ function avisar(t, cuerpo) {
 let WATCH = null, ULT_ENV = 0, ULT_POS = null, ULT_REP = 0, WL = null;
 function gps() {
   const on = (REP.disponible && !bloqueado()) || ACT.length > 0;
-  if (on && WATCH == null && navigator.geolocation) WATCH = navigator.geolocation.watchPosition(p => { POS = { lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6) }; enviarUbic(); MAPAS.forEach(m => m.mio && m.mio(POS)); },
+  if (on && WATCH == null && navigator.geolocation) WATCH = navigator.geolocation.watchPosition(p => { POS = { lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6) }; enviarUbic(); MAPAS.forEach(m => m.mio && m.mio(POS)); espYo(); },
     e => { if (e.code === 1) toast("Da permiso de ubicación para que el cliente te vea en el mapa", true); }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
   if (!on && WATCH != null) { navigator.geolocation.clearWatch(WATCH); WATCH = null; }
 }
@@ -287,20 +287,25 @@ function pintarPedidos(silencioso) {
   const ofs = OFS.slice().sort((a, b) => (dist(a) ?? 99) - (dist(b) ?? 99));
   const dE = e => POS ? distanciaKm(POS, e.origen) : null, envs = ENVS.slice().sort((a, b) => (dE(a) ?? 99) - (dE(b) ?? 99));
   const htmlEnv = on && envs.length ? `<h2 class="a-t">📦 Envíos de paquetes <b>${envs.length}</b></h2>${envs.map(e => { const d = dE(e), mio = MISOF[e.id];
-      return `<article class="of env"><div class="of-h"><b>${esc(TAM[e.tamano]?.[0] || "Paquete")}</b><strong>${S(e.oferta)}</strong></div>
-        <p><span class="lg a">A</span> ${esc(e.origen.dis)}${d != null ? ` · <b>a ${d.toFixed(1)} km de ti</b>` : ""}</p><p><span class="lg b">B</span> ${esc(e.destino.dis)}${e.interprov ? `, ${esc(e.destino.provincia)}` : ""} · ${e.km} km de viaje</p>
+      return `<article class="of env ${ESP.sel === "e:" + e.id ? "sel" : ""}" data-sel="e:${esc(e.id)}"><div class="of-h"><b>${esc(TAM[e.tamano]?.[0] || "Paquete")}</b><strong>${S(e.oferta)}</strong></div>
+        <p><span class="lg a">A</span> ${esc(e.origen.dis)}${d != null ? ` · <b>~${d.toFixed(1)} km de ti</b> <small class="muted">en línea recta</small>` : ""}</p><p><span class="lg b">B</span> ${esc(e.destino.dis)}${e.interprov ? `, ${esc(e.destino.provincia)}` : ""} · ${e.km} km de viaje</p>
         <div class="tags">${e.interprov ? `<span class="st warn">🚩 Interprovincial</span>` : ""}<span class="st">${esc(e.contenido)}</span><span class="st">${e.paga === "recibe" ? "Paga quien recibe" : "Pagan al recoger"}</span><span class="st mute">${hace(e.buscadoEn)}</span></div>
         ${mio ? `<div class="alert sm">💬 Mandaste tu contraoferta de <b>${S(mio)}</b>. Si el cliente te elige, te avisamos.</div>` : ""}
         <div class="of-b"><button class="btn btn-pri" data-tomarE="${esc(e.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>Aceptar ${S(e.oferta)}</button><button class="btn btn-light" data-contra="${esc(e.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>${mio ? "Cambiar precio" : "Contraofertar"}</button></div></article>`; }).join("")}` : "";
   const html = `${ACT.map(tarjetaActiva).join("")}${htmlEnv}
     ${on ? `<h2 class="a-t">Pedidos cerca de ti ${ofs.length ? `<b>${ofs.length}</b>` : ""}</h2>${ACT.length >= MAX_ACT ? `<div class="alert">ℹ️ <span>Ya llevas ${MAX_ACT} pedidos. Entrega uno para tomar otro.</span></div>` : ""}
-      ${ofs.map(o => { const d = dist(o); return `<article class="of ${o.vehiculo === "carro" ? "grande" : ""}"><div class="of-h"><b>${esc(o.negocio.nombre)}</b><strong>${S(o.envio)}</strong></div>
-        <p>🏪 ${esc(o.negocio.direccion || "")}${d != null ? ` · <b>a ${d.toFixed(1)} km de ti</b>` : ""}</p><p>🏠 Zona: <b>${esc(o.zona || "—")}</b> · ${o.km ?? "?"} km del negocio al cliente</p>
+      ${ofs.map(o => { const d = dist(o); return `<article class="of ${o.vehiculo === "carro" ? "grande" : ""} ${ESP.sel === "o:" + o.id ? "sel" : ""}" data-sel="o:${esc(o.id)}"><div class="of-h"><b>${esc(o.negocio.nombre)}</b><strong>${S(o.envio)}</strong></div>
+        <p>🏪 ${esc(o.negocio.direccion || "")}${d != null ? ` · <b>~${d.toFixed(1)} km de ti</b> <small class="muted">en línea recta</small>` : ""}</p><p>🏠 Zona: <b>${esc(o.zona || "—")}</b> · ${o.km ?? "?"} km del negocio al cliente</p>
         <div class="tags">${o.vehiculo === "carro" ? `<span class="st warn">🚗 Envío grande</span>` : o.vehiculo === "moto" ? `<span class="st">🛵 Envío pequeño</span>` : ""}${o.pago === "Efectivo" ? `<span class="st">💵 Efectivo</span>` : `<span class="st ok">Comida pagada (${esc(o.pago)})</span>`}${o.tiempo ? `<span class="st">⏱ Listo en ~${esc(o.tiempo)} min</span>` : ""}<span class="st mute">${hace(o.creado)}</span></div>
-        <button class="btn btn-pri btn-lg" data-tomar="${esc(o.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>Aceptar pedido</button></article>`; }).join("") || (envs.length ? `<p class="muted sm">Por ahora no hay pedidos de comida.</p>` : `<div class="vacio"><span class="radar"></span><p>Esperando pedidos… te avisaremos con sonido.</p><small>Deja esta pantalla abierta.</small></div>`)}`
+        <button class="btn btn-pri btn-lg" data-tomar="${esc(o.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>Aceptar pedido</button></article>`; }).join("") || (envs.length ? `<p class="muted sm">Por ahora no hay pedidos de comida.</p>` : `<div class="vacio esp-v"><p>Esperando pedidos… te avisaremos con sonido.</p><small>Deja esta pantalla abierta.</small></div>`)}`
     : !ACT.length ? `<div class="vacio"><span class="big">😴</span><p><b>Estás desconectado</b></p><small>Activa «Disponible» arriba para recibir pedidos.</small></div>` : ""}`;
-  if (silencioso && V.dataset.h === html) return;
-  V.innerHTML = html; V.dataset.h = html; MAPAS = [];
+  // Mapa de espera (solo cuando está disponible y no lleva pedidos): se crea una vez y no se redibuja
+  if (!$("#vl", V)) { V.innerHTML = `<section id="espW" class="esp" hidden><div id="espMapa" class="mapa esp-m"></div><div id="espInfo" class="esp-i"></div></section><div id="vl"></div>`; ESP.m = null; }
+  const espera = on && !ACT.length; $("#espW").hidden = !espera;
+  if (espera) { espIniciar($("#espMapa")); espItems(ofs, envs); }
+  const VL = $("#vl");
+  if (silencioso && VL.dataset.h === html) return;
+  VL.innerHTML = html; VL.dataset.h = html; MAPAS = [];
   ACT.forEach(p => { const el = $(`#m-${CSS.escape(p.id)}`); if (!el) return; const yo = () => POS && { ...POS, color: "#FFC21A", txt: VEHIC[REP.vehiculo]?.[0] || "🛵" };
     const pts = () => p._t === "e" ? [{ ...p.origen, color: "#E63946", txt: "A" }, { ...p.destino, color: "#1A1430", txt: "B" }, yo()] : [p.negocio.ubic && { ...p.negocio.ubic, color: "#E63946", txt: "🏪" }, p.destino && { ...p.destino, color: "#1A1430", txt: "🏠" }, yo()];
     mapaPuntos(el, pts()).then(m => { if (m) MAPAS.push({ mio: () => m.pintar(pts()) }); }); });
@@ -308,7 +313,8 @@ function pintarPedidos(silencioso) {
     if (t) return tomar(OFS.find(o => o.id === t.dataset.tomar), t);
     if (te) return tomarEnvio(ENVS.find(x => x.id === te.dataset.tomare), te);
     if (co) return contraofertar(ENVS.find(x => x.id === co.dataset.contra));
-    if (a) { const [acc, id] = a.dataset.acc.split("|"); accion(acc, ACT.find(p => p.id === id)); } };
+    if (a) { const [acc, id] = a.dataset.acc.split("|"); return accion(acc, ACT.find(p => p.id === id)); }
+    const sl = e.target.closest("[data-sel]"); if (sl && !e.target.closest("button, a")) { espSel(sl.dataset.sel); $("#espW")?.scrollIntoView({ behavior: "smooth", block: "start" }); } };
 }
 function tarjetaActiva(p) {
   if (p._t === "e") return tarjetaEnvio(p);
@@ -494,4 +500,69 @@ function cambiarFoto() { let F2 = "";
     const u = await subirFoto(`perfiles/${YO.uid}/foto-${Date.now().toString(36)}.jpg`, F2);
     await DB.set("repartidores", YO.uid, { fotoNueva: u, fotoNuevaEn: ahora() }); REP.fotoNueva = u; $(".a-foto")?.remove(); toast("📸 Foto enviada para revisión"); if (TAB === "perfil") pintarPerfil(); }, "Enviar foto", { alAbrir: () => {
     $("#cfF").onchange = async e => { const f = e.target.files[0]; if (!f) return; F2 = await redimensionar(f, 700, .8); $("#cfV").textContent = ""; $("#cfV").style.backgroundImage = `url('${F2}')`; }; } });
+}
+
+/* ---------- Mapa de espera: mi ubicación, pedidos con su precio y la ruta hasta el que elijo ---------- */
+const ESP = { m: null, L: null, yo: null, pins: null, ruta: null, sel: null, items: [], mano: false, rutaDesde: null, cache: {} };
+async function espIniciar(el) {
+  if (ESP.m || ESP.cargando) return; ESP.cargando = true;
+  let L; try { L = await cargarLeaflet(); } catch (e) { ESP.cargando = false; mapaFallo(el, () => espIniciar(el)); return; }
+  ESP.cargando = false; if (!document.body.contains(el)) return;
+  const c = POS || centroDe(REP.departamento, REP.provincia) || CONF.centro; el.innerHTML = "";
+  ESP.L = L; ESP.m = L.map(el, { zoomControl: false, attributionControl: true }).setView([c.lat, c.lng], 15);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(ESP.m);
+  ESP.ruta = L.layerGroup().addTo(ESP.m); ESP.pins = L.layerGroup().addTo(ESP.m); ESP.yo = null; ESP.mano = false;
+  ESP.m.on("dragstart", () => ESP.mano = true);
+  espYo(); espPintar();
+}
+function espYo() {
+  if (!ESP.m || !POS) return; const L = ESP.L;
+  if (!ESP.yo) ESP.yo = L.marker([POS.lat, POS.lng], { icon: L.divIcon({ className: "yo-pin", html: `<span>${VEHIC[REP.vehiculo]?.[0] || "🛵"}</span>`, iconSize: [40, 40], iconAnchor: [20, 20] }), zIndexOffset: 1000 }).addTo(ESP.m);
+  else ESP.yo.setLatLng([POS.lat, POS.lng]);
+  if (!ESP.sel && !ESP.mano) ESP.m.setView([POS.lat, POS.lng], Math.max(ESP.m.getZoom(), 15));
+  // Si me moví más de 150 m, recalculo la ruta hasta el pedido elegido
+  if (ESP.sel && ESP.rutaDesde && distanciaKm(ESP.rutaDesde, POS) > .15) espRuta();
+}
+// Lista de pedidos para el mapa (pedidos de comida y envíos de paquetes)
+function espItems(ofs, envs) {
+  const it = [...ofs.filter(o => o.negocio.ubic).map(o => ({ k: "o:" + o.id, tipo: "o", nombre: o.negocio.nombre, precio: o.envio, pick: o.negocio.ubic, zona: o.zonaUbic || null, zonaTxt: o.zona, km: o.km })),
+    ...envs.map(e => ({ k: "e:" + e.id, tipo: "e", nombre: TAM[e.tamano]?.[0] || "Paquete", precio: e.oferta, pick: e.origen, zona: e.destino, zonaTxt: e.destino.dis + (e.interprov ? ", " + e.destino.provincia : ""), km: e.km }))];
+  const firma = JSON.stringify(it.map(x => [x.k, x.precio]));
+  if (firma === ESP.firma) return; ESP.firma = firma; ESP.items = it; espPintar();
+}
+function espPintar() {
+  if (!ESP.m) return; const L = ESP.L; ESP.pins.clearLayers();
+  if (!ESP.items.find(x => x.k === ESP.sel)) ESP.sel = ESP.items[0] ? ESP.items[0].k : null;   // el más cercano
+  ESP.items.forEach(x => L.marker([x.pick.lat, x.pick.lng], { icon: L.divIcon({ className: "pr-pin", html: `<div class="pr ${x.k === ESP.sel ? "on" : ""} ${x.tipo === "e" ? "env" : ""}"><i>${x.tipo === "e" ? "📦" : "🏪"}</i><b>${S(x.precio)}</b></div>`, iconSize: [96, 40], iconAnchor: [48, 40] }), zIndexOffset: x.k === ESP.sel ? 500 : 0 })
+    .on("click", () => espSel(x.k)).addTo(ESP.pins));
+  espRuta();
+}
+function espSel(k) { if (!ESP.items.find(x => x.k === k)) return; ESP.sel = k; ESP.mano = false; espPintar(); $$("#vl [data-sel]").forEach(a => a.classList.toggle("sel", a.dataset.sel === k)); }
+// Ruta por calles con el servicio público OSRM; si falla, línea recta punteada
+async function rutaCalles(a, b) {
+  const key = [a.lat, a.lng, b.lat, b.lng].map(v => (+v).toFixed(4)).join(",");
+  if (ESP.cache[key]) return ESP.cache[key];
+  try {
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 7000);
+    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`, { signal: ctl.signal }).then(x => x.json()); clearTimeout(t);
+    const rt = r.routes && r.routes[0]; if (!rt) throw 0;
+    return ESP.cache[key] = { pts: rt.geometry.coordinates.map(([lng, lat]) => [lat, lng]), km: rt.distance / 1000, min: Math.max(1, Math.round(rt.duration / 60)) };
+  } catch (e) { return { pts: [[a.lat, a.lng], [b.lat, b.lng]], km: distanciaKm(a, b), min: null, recta: true }; }
+}
+async function espRuta() {
+  if (!ESP.m) return; const L = ESP.L, it = ESP.items.find(x => x.k === ESP.sel), info = $("#espInfo"); ESP.ruta.clearLayers();
+  if (!it) { ESP.rutaDesde = null; info.innerHTML = `<div class="esp-esp"><span class="radar sm"></span><div><b>Esperando pedidos…</b><small>Te avisaremos con sonido. Deja esta pantalla abierta.</small></div></div>`; if (POS && !ESP.mano) ESP.m.setView([POS.lat, POS.lng], 15); return; }
+  // Del recojo a la zona de entrega: línea punteada (la dirección exacta se ve al aceptar)
+  if (it.zona) { L.polyline([[it.pick.lat, it.pick.lng], [it.zona.lat, it.zona.lng]], { color: "#1A1430", weight: 3, dashArray: "6 8", opacity: .7 }).addTo(ESP.ruta);
+    if (it.tipo === "o") L.circle([it.zona.lat, it.zona.lng], { radius: 600, color: "#1A1430", weight: 1.5, fillOpacity: .08 }).addTo(ESP.ruta);
+    else L.marker([it.zona.lat, it.zona.lng], { icon: pinIcono(L, "#1A1430", "B") }).addTo(ESP.ruta); }
+  const pinta = r => {
+    info.innerHTML = `<div class="esp-sel"><div><b>${it.tipo === "e" ? "📦" : "🏪"} ${esc(it.nombre)}</b><small>${r ? `🛵 a <b>${r.km.toFixed(1)} km</b>${r.min ? ` · ${r.min} min` : ""} de ti${r.recta ? " (aprox.)" : ""}` : "Activa tu GPS para ver la ruta"} · 🏠 ${esc(it.zonaTxt || "")}${it.km != null ? ` · ${it.km} km al cliente` : ""}</small></div><strong>${S(it.precio)}</strong></div>`;
+    const b = [[it.pick.lat, it.pick.lng]]; if (POS) b.push([POS.lat, POS.lng]); if (it.zona) b.push([it.zona.lat, it.zona.lng]);
+    if (!ESP.mano) ESP.m.fitBounds(b, { padding: [36, 36], maxZoom: 16 });
+  };
+  if (!POS) return pinta(null);
+  ESP.rutaDesde = { ...POS }; const k = ESP.sel, r = await rutaCalles(POS, it.pick);
+  if (ESP.sel !== k) return;
+  L.polyline(r.pts, { color: "#E63946", weight: 5, opacity: .9, dashArray: r.recta ? "8 8" : null }).addTo(ESP.ruta); pinta(r);
 }
