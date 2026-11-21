@@ -223,6 +223,9 @@ async function cargarRubros(todos, alCambiar) { return aplicarRubros(await rapid
 const rubroDe = id => RUBROS.find(r => r.id === id) || { id, nombre: id || "", tipos: [], modo: "productos" };
 // Rubros de envío grande (Ferretería y Talleres): van en carro; si el pedido es pequeño, solo en moto
 const envioGrande = id => { const r = rubroDe(id); return r.envioGrande ?? ["ferreteria", "talleres"].includes(id); };
+// Rubros que reciben «Buscar repuesto» (Ferretería, Talleres y los que marque el admin, ej. Repuestos)
+const recibeBusq = id => { const r = rubroDe(id); return r.buscaRepuestos ?? ["ferreteria", "talleres", "repuestos"].includes(id); };
+const rubrosBusq = () => { const l = RUBROS.filter(r => recibeBusq(r.id)).map(r => r.id); return l.length ? l.slice(0, 10) : ["ferreteria", "talleres"]; };
 // Las imágenes de ejemplo viven en la web de clientes (img/rubros/…). El panel las pide desde ahí.
 const imgUrl = src => !src ? "" : /^(https?:|data:|blob:)/.test(src) ? src : (window.ES_PANEL ? String(AP.web || "").replace(/\/$/, "") + "/" : "") + src;
 
