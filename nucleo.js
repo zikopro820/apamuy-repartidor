@@ -205,7 +205,12 @@ const errorAuth = e => ({ "auth/invalid-credential": "Correo o contraseña incor
 
 /* ---------- Configuración general de la plataforma ---------- */
 const WEB_BASE = { titulo: "¿Qué quieres hoy?", subtitulo: "Pide a los negocios de tu ciudad. Te lo traemos a tu puerta.", buscador: "Busca comida, farmacia, ferretería…", anuncio: "",
-  mostrarBanners: true, mostrarDestacados: true, tituloDestacados: "Lo más recomendado", tituloNegocios: "Negocios en tu ciudad", pie: "Te lo traemos. Pide a los negocios de tu ciudad.", facebook: "", instagram: "", tiktok: "" };
+  mostrarBanners: true, mostrarDestacados: true,
+  // Botones del inicio (se editan en Panel → Página web)
+  btnEnvio: true, envTit: "Envía un paquete", envTxt: "Tú pones el precio · en tu ciudad o a otra",
+  btnRep: true, repTit: "Quiero ser repartidor", repTxt: "Inscripción gratis · tú eliges tus horarios",
+  btnBusq: true, bqTit: "¿Buscas un repuesto o material?", bqTxt: "Pregunta a todas las tiendas a la vez",
+  btnAux: true, auxTit: "Auxilio mecánico", auxTxt: "¿Te quedaste varado? Un taller va hasta ti", tituloDestacados: "Lo más recomendado", tituloNegocios: "Negocios en tu ciudad", pie: "Te lo traemos. Pide a los negocios de tu ciudad.", facebook: "", instagram: "", tiktok: "" };
 // rep: lo que paga el repartidor (casaca y % de su ganancia del día). cobro: Yape de Apamuy donde le pagan.
 const CONFIG_BASE = { comision: 10, delivery: { base: 4, porKm: 1, maxKm: 15, maxKmGrande: 50 }, centro: AP.centro || { lat: -13.5226, lng: -71.9673 }, soporte: "", ciudadInicial: { dep: "Cusco", prov: "Cusco" }, web: WEB_BASE, tipos: [],
   rep: { comision: 10, casaca: 40 }, cobro: { yape: "", titular: "", qr: "" },
