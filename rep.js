@@ -190,6 +190,7 @@ function app() {
       <label class="disp"><input type="checkbox" id="disp" ${REP.disponible ? "checked" : ""}><i></i><span id="dispT"></span></label></header>
     <div id="aviso"></div><main id="v" class="a-v"></main>
     <nav class="a-nav">${[["pedidos", '<circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/><path d="M15 6h3l-3 11.5M5.5 17.5 9 10h7M12 6h2"/>', "Pedidos"], ["ganancias", '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>', "Ganancias"], ["perfil", '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>', "Perfil"]].map(([k, e, t]) => `<button data-t="${k}"><span><svg class="iw" viewBox="0 0 24 24" aria-hidden="true">${e}</svg></span>${t}</button>`).join("")}</nav>`;
+  if (window.Notification?.permission === "granted") activarAvisos("rep", true);
   barraInstalar(); if (!REP.fotoPerfil && !REP.fotoNueva) $("#aviso").insertAdjacentHTML("afterend", `<div class="alert warn a-foto">📸 <span><b>Sube tu foto de perfil</b>: los clientes la ven al recibir su pedido.</span><button class="btn btn-light btn-sm" id="avFoto">Subir</button></div>`);
   $("#avFoto")?.addEventListener("click", cambiarFoto);
   $(".a-nav").onclick = e => { const b = e.target.closest("[data-t]"); if (b) { TAB = b.dataset.t; pintarTab(); } };
@@ -227,7 +228,7 @@ function estadoDisp() {
 async function cambiarDisp(on) {
   if (on && bloqueado()) { estadoDisp(); return pagar(); }
   if (on && soatVencido(REP)) { estadoDisp(); TAB = "perfil"; return pintarTab(); }
-  if (on && "Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
+  if (on && estadoAvisos() !== "ok") activarAvisos("rep").then(r => { if (r !== "ok" && r !== "demo") toast(textoAvisos(r), true); pintarTab(); });
   if (on) { try { POS = await miUbicacion(); } catch (e) { toast("Activa el GPS para recibir pedidos cerca de ti", true); } }
   REP.disponible = on; await DB.set("repartidores", YO.uid, { disponible: on, ...(POS ? { ubic: { ...POS, t: ahora() } } : {}) });
   despierto(on || ACT.length > 0); estadoDisp(); toast(on ? "🟢 Estás disponible: te avisaremos de los pedidos" : "Desconectado"); pintarTab();
@@ -256,7 +257,8 @@ function escucharOfertas(on) {
 }
 function avisar(t, cuerpo) {
   beep(3); navigator.vibrate?.([300, 120, 300]); toast(t + " · " + cuerpo);
-  if (document.hidden && "Notification" in window && Notification.permission === "granted") navigator.serviceWorker?.ready.then(r => r.showNotification(t, { body: cuerpo, icon: "img/icon-192.png", badge: "img/icon-192.png", tag: "apamuy", renotify: true, vibrate: [300, 120, 300] })).catch(() => {});
+  // Si los avisos del servidor están activos, la notificación la pone el servidor (evita duplicados)
+  if (document.hidden && estadoAvisos() !== "ok" && "Notification" in window && Notification.permission === "granted") navigator.serviceWorker?.ready.then(r => r.showNotification(t, { body: cuerpo, icon: "img/icon-192.png", badge: "img/icon-192.png", tag: "apamuy", renotify: true, vibrate: [300, 120, 300] })).catch(() => {});
 }
 
 /* ---------- GPS en vivo y pantalla encendida ---------- */
@@ -297,7 +299,7 @@ function pintarPedidos(silencioso) {
       ${ofs.map(o => { const d = dist(o); return `<article class="of ${o.vehiculo === "carro" ? "grande" : ""} ${ESP.sel === "o:" + o.id ? "sel" : ""}" data-sel="o:${esc(o.id)}"><div class="of-h"><b>${esc(o.negocio.nombre)}</b><strong>${S(o.envio)}</strong></div>
         <p>🏪 ${esc(o.negocio.direccion || "")}${d != null ? ` · <b>~${d.toFixed(1)} km de ti</b> <small class="muted">en línea recta</small>` : ""}</p><p>🏠 Zona: <b>${esc(o.zona || "—")}</b> · ${o.km ?? "?"} km del negocio al cliente</p>
         <div class="tags">${o.vehiculo === "carro" ? `<span class="st warn">🚗 Envío grande</span>` : o.vehiculo === "moto" ? `<span class="st">🛵 Envío pequeño</span>` : ""}${o.pago === "Efectivo" ? `<span class="st">💵 Efectivo</span>` : `<span class="st ok">Comida pagada (${esc(o.pago)})</span>`}${o.tiempo ? `<span class="st">⏱ Listo en ~${esc(o.tiempo)} min</span>` : ""}<span class="st mute">${hace(o.creado)}</span></div>
-        <button class="btn btn-pri btn-lg" data-tomar="${esc(o.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>Aceptar pedido</button></article>`; }).join("") || (envs.length ? `<p class="muted sm">Por ahora no hay pedidos de comida.</p>` : `<div class="vacio esp-v"><p>Esperando pedidos… te avisaremos con sonido.</p><small>Deja esta pantalla abierta.</small></div>`)}`
+        <button class="btn btn-pri btn-lg" data-tomar="${esc(o.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>Aceptar pedido</button></article>`; }).join("") || (envs.length ? `<p class="muted sm">Por ahora no hay pedidos de comida.</p>` : `<div class="vacio esp-v"><p>Esperando pedidos… te avisaremos con sonido.</p><small>${estadoAvisos() === "ok" ? "Puedes cerrar la app: te llegará el aviso." : "Activa los avisos en Perfil para recibirlos con la app cerrada."}</small></div>`)}`
     : !ACT.length ? `<div class="vacio"><span class="big">😴</span><p><b>Estás desconectado</b></p><small>Activa «Disponible» arriba para recibir pedidos.</small></div>` : ""}`;
   // Mapa de espera (solo cuando está disponible y no lleva pedidos): se crea una vez y no se redibuja
   if (!$("#vl", V)) { V.innerHTML = `<section id="espW" class="esp" hidden><div id="espMapa" class="mapa esp-m"></div><div id="espInfo" class="esp-i"></div></section><div id="vl"></div>`; ESP.m = null; }
@@ -417,12 +419,12 @@ async function pintarPerfil() {
     <section class="card"><h2>${vehTxt(r.vehiculo)}</h2><dl class="dl">${r.placa ? `<dt>Placa</dt><dd>${esc(r.placa)}</dd><dt>Licencia</dt><dd>${esc(r.licencia || "")}</dd><dt>SOAT</dt><dd>${soatVencido(r) ? `<span class="st bad">Vencido</span>` : "vence"} ${fmtF(r.soatVence, { day: "numeric", month: "short", year: "numeric" })}</dd>` : `<dt>Tipo</dt><dd>Bicicleta</dd>`}</dl>
       ${r.placa ? `<button class="btn btn-light" id="pfSoat">Actualizar mi SOAT</button>` : ""}</section>
     <section class="card"><h2>📲 Para no perder pedidos</h2><ul class="tips"><li>${app ? "✅ Ya usas la app instalada." : ios ? "Instálala: toca <b>Compartir</b> ⬆️ → <b>Agregar a inicio</b>." : "Instálala: menú ⋮ de Chrome → <b>Instalar app</b> (o «Agregar a la pantalla principal»)."}</li>
-      <li>Mientras estés disponible, <b>deja la app abierta</b> (la pantalla no se apaga sola).</li><li>Activa el <b>GPS</b> y el <b>volumen</b>.</li></ul>
-      ${"Notification" in window && Notification.permission !== "granted" ? `<button class="btn btn-light" id="pfNot">🔔 Activar notificaciones</button>` : ""}</section>
+      <li>Activa los <b>avisos</b>: te sonará cada pedido aunque cierres la app o bloquees el celular.</li><li>Activa el <b>GPS</b> y el <b>volumen</b>. Mientras llevas un pedido, deja la app abierta para que el cliente te vea en el mapa.</li></ul>
+      ${estadoAvisos() === "ok" ? `<p class="av-ok">🔔 Avisos activados: te sonará cada pedido aunque cierres la app.</p>` : `<button class="btn btn-pri" id="pfNot">🔔 Activar avisos de pedidos</button>${estadoAvisos() === "bloqueado" ? `<p class="muted sm">${textoAvisos("bloqueado")}</p>` : ""}`}</section>
     ${CONF.soporte ? `<a class="btn btn-wa btn-lg" href="${esc(wa(CONF.soporte, `Hola Apamuy, soy ${r.nombre}, repartidor.`))}" target="_blank" rel="noopener">Ayuda por WhatsApp</a>` : ""}
     <button class="btn btn-light btn-lg" id="pfSalir">Cerrar sesión</button>`;
   $("#pfSalir").onclick = async () => { if (REP.disponible) await DB.set("repartidores", YO.uid, { disponible: false }).catch(() => {}); Sesion.salir(); };
-  $("#pfNot")?.addEventListener("click", async () => { const p = await Notification.requestPermission(); toast(p === "granted" ? "🔔 Notificaciones activadas" : "No diste permiso", p !== "granted"); pintarPerfil(); });
+  $("#pfNot")?.addEventListener("click", async () => { const r = await activarAvisos("rep"); toast(textoAvisos(r), r !== "ok"); pintarPerfil(); });
   $("#pfSoat")?.addEventListener("click", () => { let F2 = "";
     modal("Actualizar SOAT", `${fld("soatVence", "El nuevo SOAT vence el", "", { type: "date", req: true })}<div class="up"><span class="up-v" id="sV">📷</span><div><b>Foto del SOAT nuevo</b><label class="btn btn-light btn-sm">Subir foto<input type="file" accept="image/*" id="sF" hidden></label></div></div>`, async d => {
       if (!F2) { toast("Sube la foto del SOAT", true); return false; } if (d.soatVence < HOY()) { toast("Ese SOAT ya venció", true); return false; }
@@ -551,7 +553,7 @@ async function rutaCalles(a, b) {
 }
 async function espRuta() {
   if (!ESP.m) return; const L = ESP.L, it = ESP.items.find(x => x.k === ESP.sel), info = $("#espInfo"); ESP.ruta.clearLayers();
-  if (!it) { ESP.rutaDesde = null; info.innerHTML = `<div class="esp-esp"><span class="radar sm"></span><div><b>Esperando pedidos…</b><small>Te avisaremos con sonido. Deja esta pantalla abierta.</small></div></div>`; if (POS && !ESP.mano) ESP.m.setView([POS.lat, POS.lng], 15); return; }
+  if (!it) { ESP.rutaDesde = null; info.innerHTML = `<div class="esp-esp"><span class="radar sm"></span><div><b>Esperando pedidos…</b><small>${estadoAvisos() === "ok" ? "Te avisaremos aunque cierres la app." : "Te avisaremos con sonido. Deja esta pantalla abierta."}</small></div></div>`; if (POS && !ESP.mano) ESP.m.setView([POS.lat, POS.lng], 15); return; }
   // Del recojo a la zona de entrega: línea punteada (la dirección exacta se ve al aceptar)
   if (it.zona) { L.polyline([[it.pick.lat, it.pick.lng], [it.zona.lat, it.zona.lng]], { color: "#1A1430", weight: 3, dashArray: "6 8", opacity: .7 }).addTo(ESP.ruta);
     if (it.tipo === "o") L.circle([it.zona.lat, it.zona.lng], { radius: 600, color: "#1A1430", weight: 1.5, fillOpacity: .08 }).addTo(ESP.ruta);

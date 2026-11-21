@@ -131,6 +131,39 @@ async function verPrivado(ruta) {
 }
 const leerArchivo = f => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(f); });
 
+/* ---------- Avisos al celular (notificaciones push), aunque la app esté cerrada ---------- */
+// app: "web" (clientes) · "panel" (negocios y admin) · "rep" (repartidores)
+function estadoAvisos() {
+  if (DEMO) return "demo";
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent), app = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+  if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) return ios && !app ? "ios" : "nosoporta";
+  if (Notification.permission === "denied") return "bloqueado";
+  return Notification.permission === "granted" && store.get("am_fcm_ok", 0) ? "ok" : "pendiente";
+}
+async function activarAvisos(app, silencioso) {
+  const e = estadoAvisos(); if (["demo", "nosoporta", "ios", "bloqueado"].includes(e)) return e;
+  const vapid = CONF.vapid || AP.vapid; if (!vapid) return "sinclave";
+  const per = Notification.permission === "granted" ? "granted" : silencioso ? "default" : await Notification.requestPermission();
+  if (per !== "granted") return per === "denied" ? "bloqueado" : "pendiente";
+  try {
+    const reg = await navigator.serviceWorker.register("sw.js"); await navigator.serviceWorker.ready;
+    const f = await fb(), ms = await import(`https://www.gstatic.com/firebasejs/${FB_V}/firebase-messaging.js`);
+    const token = await ms.getToken(ms.getMessaging(f.app), { vapidKey: vapid, serviceWorkerRegistration: reg });
+    const u = f.auth.currentUser; if (!token || !u) return "error";
+    if (!silencioso || store.get("am_fcm_tok", "") !== token || store.get("am_fcm_app", "") !== app)
+      await DB.set("fcm", token, { uid: u.uid, app, ...(u.email ? { email: u.email } : {}), ua: navigator.userAgent.slice(0, 120), actualizado: new Date().toISOString() });
+    store.set("am_fcm_ok", 1); store.set("am_fcm_tok", token); store.set("am_fcm_app", app); return "ok";
+  } catch (x) { console.warn("avisos", x); return "error"; }
+}
+// Mensaje para la persona según cómo quedó
+function textoAvisos(r) {
+  return { ok: "🔔 ¡Listo! Te avisaremos aunque cierres la app.", bloqueado: "Las notificaciones están bloqueadas. Toca el candado 🔒 junto a la dirección → Permisos → Notificaciones → Permitir.",
+    ios: "En iPhone, primero instala la app: Compartir ⬆️ → «Agregar a inicio», ábrela desde el ícono y activa los avisos ahí.", nosoporta: "Este navegador no permite avisos. Usa Chrome.",
+    sinclave: "Falta configurar los avisos en el panel (clave VAPID).", pendiente: "No diste permiso para los avisos.", error: "No se pudieron activar los avisos. Inténtalo de nuevo.", demo: "En modo demo no hay avisos." }[r] || r;
+}
+// Si la app está abierta y llega un aviso, se muestra adentro (no como notificación)
+if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", e => { const d = e.data || {}; if (d.tipo === "aviso") { toast(d.titulo + (d.cuerpo ? " · " + d.cuerpo : "")); window.alAviso && window.alAviso(d); } });
+
 /* ---------- Sesión ---------- */
 const Sesion = {
   usuario: null,
