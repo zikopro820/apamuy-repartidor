@@ -281,6 +281,29 @@ const PASO_ANILLO = 3 * 60e3;
 // Hasta dónde llega el aviso ahora mismo (Infinity = toda la provincia)
 function radioAviso(o, ahora = Date.now()) { const an = o.anillos || [5, 10], t = new Date(o.creado || o.buscadoEn || 0).getTime(), i = Math.floor(Math.max(0, ahora - t) / PASO_ANILLO); return i < an.length ? an[i] : Infinity; }
 
+/* ---------- Etapa 3: comisión semanal de los negocios ----------
+   Semana de lunes a domingo. Se cierra el lunes y hay 2 días para pagar (hasta el miércoles 23:59).
+   Si las ventas de la semana no llegan a S/ 30, no se cobra: se acumula para la siguiente. */
+const COB = { minVentas: 30, plazoDias: 2 };
+const lunesDe = iso => { const d = new Date(iso + "T12:00:00"); return addD(iso, -((d.getDay() + 6) % 7)); };
+const venceDe = cierre => addD(cierre, COB.plazoDias) + "T23:59:59-05:00";
+const ventaPed = p => +(p.montoFinal ?? p.subtotal) || 0;
+const EST_L = { pendiente: ["Por pagar", "warn"], revision: ["Pago en revisión", "pri"], pagada: ["Pagada", "ok"], acumulada: ["Se acumula", "mute"], sumada: ["Sumada a otra semana", "mute"] };
+const semTxt = l => `${fmtF(l.desde, { day: "numeric", month: "short" })} al ${fmtF(l.hasta, { day: "numeric", month: "short" })}`;
+// Liquidaciones de una semana (desde = lunes). acum = liquidaciones «acumulada» de semanas anteriores.
+function calcLiquidaciones(desde, pedidos, negocios, acum, pctGeneral) {
+  const hasta = addD(desde, 6), cierre = addD(desde, 7), R = {};
+  pedidos.filter(p => p.estado === "entregado" && p.dia >= desde && p.dia <= hasta && !String(p.negocioId).startsWith("demo-")).forEach(p => { const r = R[p.negocioId] || (R[p.negocioId] = { n: 0, v: 0 }); r.n++; r.v += ventaPed(p); });
+  return Object.entries(R).map(([id, r]) => {
+    const n = negocios.find(x => x.id === id) || { id, nombre: id }, pct = n.comision != null && n.comision !== "" ? +n.comision : +pctGeneral;
+    const ant = acum.filter(a => a.negocioId === id), aV = ant.reduce((t, a) => t + (+a.ventasTotal || 0), 0), aC = ant.reduce((t, a) => t + (+a.total || 0), 0);
+    const com = r2(r.v * pct / 100), ventasTotal = r2(r.v + aV), total = r2(com + aC), cobra = ventasTotal >= COB.minVentas;
+    return { id: id + "_" + desde, ant: ant.map(a => a.id), data: { negocioId: id, negocio: n.nombre || "", whatsapp: n.whatsapp || "", semana: desde, desde, hasta, pedidos: r.n, ventas: r2(r.v), pct, comision: com,
+      arrastre: ant.length ? { semanas: ant.map(a => a.semana), ventas: r2(aV), comision: r2(aC) } : null, ventasTotal, total, estado: cobra ? "pendiente" : "acumulada", vence: cobra ? venceDe(cierre > HOY() ? cierre : HOY()) : null,   // si se liquida tarde, igual tiene sus 2 días
+      creado: new Date().toISOString() } };
+  });
+}
+
 /* ---------- Horario del negocio (hora de Lima) ---------- */
 function estaAbierto(n) {
   if (!n) return false; if (n.estadoManual === "abierto") return true; if (n.estadoManual === "cerrado") return false;
