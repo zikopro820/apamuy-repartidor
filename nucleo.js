@@ -35,9 +35,30 @@ const FB_V = "10.12.2"; let FBX = null;
 async function fb() {
   if (FBX) return FBX;
   const base = `https://www.gstatic.com/firebasejs/${FB_V}/`;
-  const [app, fs, au, st] = await Promise.all(["app", "firestore", "auth", "storage"].map(m => import(base + `firebase-${m}.js`)));
+  // Solo lo necesario para arrancar (base de datos + sesión). Las fotos (Storage) se cargan cuando se usan.
+  const [app, fs, au] = await Promise.all(["app", "firestore", "auth"].map(m => import(base + `firebase-${m}.js`)));
   const a = app.getApps().length ? app.getApp() : app.initializeApp(CFG);
-  FBX = { fs, au, st, db: fs.getFirestore(a), auth: au.getAuth(a), storage: st.getStorage(a) }; return FBX;
+  FBX = { app: a, fs, au, db: fs.getFirestore(a), auth: au.getAuth(a) }; return FBX;
+}
+let FBST = null;
+async function fbSt() {
+  if (FBST) return FBST; const f = await fb(), st = await import(`https://www.gstatic.com/firebasejs/${FB_V}/firebase-storage.js`);
+  FBST = { st, storage: st.getStorage(f.app) }; return FBST;
+}
+if (!DEMO) fb().catch(() => {});   // empieza a conectar apenas abre la página
+
+/* ---------- Memoria rápida: muestra al instante lo de la última visita y lo actualiza por detrás ---------- */
+const MEM = {
+  get(k) { try { const x = JSON.parse(localStorage.getItem("am_c_" + k)); return x ? x.v : undefined; } catch (e) { return undefined; } },
+  set(k, v) { try { localStorage.setItem("am_c_" + k, JSON.stringify({ t: Date.now(), v })); } catch (e) {} }
+};
+// Devuelve lo guardado al instante (si hay) y trae lo nuevo por detrás; si cambió, avisa con alCambiar(nuevo)
+async function rapido(k, traer, alCambiar) {
+  if (DEMO || window.ES_PANEL) return traer();   // el panel siempre trae lo último (ahí se edita)
+  const viejo = MEM.get(k);
+  const nuevo = traer().then(v => { MEM.set(k, v); if (viejo !== undefined && JSON.stringify(v) !== JSON.stringify(viejo) && alCambiar) alCambiar(v); return v; });
+  if (viejo !== undefined) { nuevo.catch(() => {}); return viejo; }
+  return nuevo;
 }
 
 /* ---------- Base de datos (Firebase o demo en este navegador) ---------- */
@@ -93,7 +114,7 @@ function limpiar(o) { if (Array.isArray(o)) return o.map(limpiar); if (o && type
 async function subirFoto(ruta, dataURL) {
   if (!dataURL || !String(dataURL).startsWith("data:")) return dataURL || "";
   if (DEMO) return dataURL;
-  const { st, storage } = await fb(), r = st.ref(storage, ruta);
+  const { st, storage } = await fbSt(), r = st.ref(storage, ruta);
   await st.uploadString(r, dataURL, "data_url"); return st.getDownloadURL(r);
 }
 
@@ -102,11 +123,11 @@ async function subirFoto(ruta, dataURL) {
 async function subirPrivado(ruta, dataURL) {
   if (!dataURL || !String(dataURL).startsWith("data:")) return dataURL || "";
   if (DEMO) return dataURL;
-  const { st, storage } = await fb(); await st.uploadString(st.ref(storage, ruta), dataURL, "data_url"); return ruta;
+  const { st, storage } = await fbSt(); await st.uploadString(st.ref(storage, ruta), dataURL, "data_url"); return ruta;
 }
 async function verPrivado(ruta) {
   if (!ruta || /^(data:|https?:|blob:)/.test(ruta)) return ruta || "";
-  const { st, storage } = await fb(); return st.getDownloadURL(st.ref(storage, ruta));
+  const { st, storage } = await fbSt(); return st.getDownloadURL(st.ref(storage, ruta));
 }
 const leerArchivo = f => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(f); });
 
@@ -157,12 +178,15 @@ const CONFIG_BASE = { comision: 10, delivery: { base: 4, porKm: 1, maxKm: 8 }, c
   rep: { comision: 10, casaca: 40 }, cobro: { yape: "", titular: "", qr: "" },
   envio: { minimo: 5, base: 5, porKm: 1.2, factorGrande: 1.5, maxKm: 300 } };
 let CONF = { ...CONFIG_BASE };
-async function cargarConfig() { const c = await DB.get("config", "general").catch(() => null) || {};
+function aplicarConfig(c) { c = c || {};
   CONF = { ...CONFIG_BASE, ...c, delivery: { ...CONFIG_BASE.delivery, ...(c.delivery || {}) }, web: { ...WEB_BASE, ...(c.web || {}) }, rep: { ...CONFIG_BASE.rep, ...(c.rep || {}) }, cobro: { ...CONFIG_BASE.cobro, ...(c.cobro || {}) }, envio: { ...CONFIG_BASE.envio, ...(c.envio || {}) }, tipos: c.tipos || [] }; return CONF; }
+// alCambiar: si la configuración cambió desde la última visita (se avisa después de mostrar la guardada)
+async function cargarConfig(alCambiar) { return aplicarConfig(await rapido("config", () => DB.get("config", "general").then(c => c || {}), c => { aplicarConfig(c); alCambiar && alCambiar(); })); }
 
 /* ---------- Rubros (Comida, Farmacia, Talleres…) que crea el admin ---------- */
 let RUBROS = [];
-async function cargarRubros(todos) { RUBROS = (await DB.list("rubros").catch(() => [])).filter(r => todos || r.activo !== false).sort((a, b) => (a.orden ?? 99) - (b.orden ?? 99)); return RUBROS; }
+function aplicarRubros(l, todos) { RUBROS = (l || []).filter(r => todos || r.activo !== false).sort((a, b) => (a.orden ?? 99) - (b.orden ?? 99)); return RUBROS; }
+async function cargarRubros(todos, alCambiar) { return aplicarRubros(await rapido("rubros", () => DB.list("rubros"), l => { aplicarRubros(l, todos); alCambiar && alCambiar(); }).catch(() => []), todos); }
 const rubroDe = id => RUBROS.find(r => r.id === id) || { id, nombre: id || "", tipos: [], modo: "productos" };
 // Rubros de envío grande (Ferretería y Talleres): van en carro; si el pedido es pequeño, solo en moto
 const envioGrande = id => { const r = rubroDe(id); return r.envioGrande ?? ["ferreteria", "talleres"].includes(id); };
