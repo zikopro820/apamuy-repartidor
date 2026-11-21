@@ -4,7 +4,7 @@
    ========================================================= */
 window.AM_DEMO = function () {
   const s = window.AM_SEMILLA(), ahora = new Date().toISOString();
-  const db = { config: { general: { comision: 10, delivery: { base: 4, porKm: 1, maxKm: 8 }, ciudadInicial: { dep: "Cusco", prov: "Cusco" } } }, usuarios: {}, pedidos: {}, ...s };
+  const db = { config: { general: { comision: 10, delivery: { base: 4, porKm: 1, maxKm: 15, maxKmGrande: 50 }, ciudadInicial: { dep: "Cusco", prov: "Cusco" } } }, usuarios: {}, pedidos: {}, ...s };
   db.negocios["neg-jugos"] = { owner: "neg-jugos", email: "jugos@demo.pe", estado: "pendiente", rubro: "comida", tipo: "Jugos", nombre: "Juguería La Fresca", descripcion: "Jugos y sánguches.", departamento: "Cusco", provincia: "Cusco", distrito: "Cusco", prov: "Cusco|Cusco",
     direccion: "Mercado San Pedro, puesto 12", ubic: { lat: -13.521, lng: -71.984 }, abre: "07:00", cierra: "19:00", dias: [0, 1, 2, 3, 4, 5, 6], telefono: "984555666", delivery: true, recojo: true, pagoYape: true, yapeNum: "984555666", contraEntrega: true, creado: ahora,
     documento: { tipo: "DNI", numero: "12345678", nombre: "Rosa Quispe" } };
@@ -13,6 +13,10 @@ window.AM_DEMO = function () {
     direccion: "Av. Grau 300", ubic: { lat: -13.528, lng: -71.975 }, abre: "08:00", cierra: "20:00", dias: [1, 2, 3, 4, 5, 6], estadoManual: "abierto", telefono: "984000111", creado: ahora };
   db["negocios/neg-taller/categorias"] = { s: { nombre: "Servicios", orden: 0 } };
   db["negocios/neg-taller/productos"] = { aceite: { cat: "s", nombre: "Cambio de aceite", precio: 35, desc: "Incluye aceite 20W-50.", activo: true, destacado: true, orden: 0 }, parche: { cat: "s", nombre: "Parchado de llanta", precio: 10, activo: true, orden: 1 } };
+  db.negocios["neg-ferre"] = { owner: "neg-ferre", email: "ferre@demo.pe", estado: "activo", rubro: "ferreteria", tipo: "Ferretería", nombre: "Ferretería El Constructor", descripcion: "Materiales, herramientas y repuestos.", departamento: "Cusco", provincia: "Cusco", distrito: "Wanchaq", prov: "Cusco|Cusco",
+    direccion: "Av. Huayruropata 850", ubic: { lat: -13.53, lng: -71.962 }, abre: "08:00", cierra: "20:00", dias: [0, 1, 2, 3, 4, 5, 6], estadoManual: "abierto", telefono: "984222333", delivery: true, recojo: true, contraEntrega: true, creado: ahora };
+  db["negocios/neg-ferre/categorias"] = { m: { nombre: "Materiales", orden: 0 } };
+  db["negocios/neg-ferre/productos"] = { cem: { cat: "m", nombre: "Cemento Sol 42.5 kg", precio: 29.9, activo: true, destacado: true, orden: 0 }, cla: { cat: "m", nombre: "Clavos 3\" (1 kg)", precio: 6.5, activo: true, orden: 1 } };
   Object.values(db.negocios).forEach(n => { if (String(n.owner).startsWith("demo-")) n.estadoManual = "abierto"; });
   // Repartidores de prueba (los "documentos" son dibujos de ejemplo)
   const doc = t => "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200"><rect width="320" height="200" rx="14" fill="#f1e9db"/><text x="160" y="108" font-family="sans-serif" font-size="22" text-anchor="middle" fill="#625C73">${t}</text></svg>`);

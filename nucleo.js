@@ -207,12 +207,12 @@ const errorAuth = e => ({ "auth/invalid-credential": "Correo o contraseña incor
 const WEB_BASE = { titulo: "¿Qué quieres hoy?", subtitulo: "Pide a los negocios de tu ciudad. Te lo traemos a tu puerta.", buscador: "Busca comida, farmacia, ferretería…", anuncio: "",
   mostrarBanners: true, mostrarDestacados: true, tituloDestacados: "Lo más recomendado", tituloNegocios: "Negocios en tu ciudad", pie: "Te lo traemos. Pide a los negocios de tu ciudad.", facebook: "", instagram: "", tiktok: "" };
 // rep: lo que paga el repartidor (casaca y % de su ganancia del día). cobro: Yape de Apamuy donde le pagan.
-const CONFIG_BASE = { comision: 10, delivery: { base: 4, porKm: 1, maxKm: 8 }, centro: AP.centro || { lat: -13.5226, lng: -71.9673 }, soporte: "", ciudadInicial: { dep: "Cusco", prov: "Cusco" }, web: WEB_BASE, tipos: [],
+const CONFIG_BASE = { comision: 10, delivery: { base: 4, porKm: 1, maxKm: 15, maxKmGrande: 50 }, centro: AP.centro || { lat: -13.5226, lng: -71.9673 }, soporte: "", ciudadInicial: { dep: "Cusco", prov: "Cusco" }, web: WEB_BASE, tipos: [],
   rep: { comision: 10, casaca: 40 }, cobro: { yape: "", titular: "", qr: "" },
   envio: { minimo: 5, base: 5, porKm: 1.2, factorGrande: 1.5, maxKm: 300 } };
 let CONF = { ...CONFIG_BASE };
 function aplicarConfig(c) { c = c || {};
-  CONF = { ...CONFIG_BASE, ...c, delivery: { ...CONFIG_BASE.delivery, ...(c.delivery || {}) }, web: { ...WEB_BASE, ...(c.web || {}) }, rep: { ...CONFIG_BASE.rep, ...(c.rep || {}) }, cobro: { ...CONFIG_BASE.cobro, ...(c.cobro || {}) }, envio: { ...CONFIG_BASE.envio, ...(c.envio || {}) }, tipos: c.tipos || [] }; return CONF; }
+  CONF = { ...CONFIG_BASE, ...c, delivery: { ...CONFIG_BASE.delivery, ...(c.delivery || {}) }, web: { ...WEB_BASE, ...(c.web || {}) }, rep: { ...CONFIG_BASE.rep, ...(c.rep || {}) }, cobro: { ...CONFIG_BASE.cobro, ...(c.cobro || {}) }, envio: { ...CONFIG_BASE.envio, ...(c.envio || {}) }, tipos: c.tipos || [], tarifas: c.tarifas || [] }; return CONF; }
 // alCambiar: si la configuración cambió desde la última visita (se avisa después de mostrar la guardada)
 async function cargarConfig(alCambiar) { return aplicarConfig(await rapido("config", () => DB.get("config", "general").then(c => c || {}), c => { aplicarConfig(c); alCambiar && alCambiar(); })); }
 
@@ -245,6 +245,33 @@ function distanciaKm(a, b) {
 }
 // Lo que cobra el repartidor: base + por km, redondeado a 0.50
 function costoDelivery(km, d = CONF.delivery) { if (km == null) return null; if (km > d.maxKm) return -1; return Math.ceil((d.base + Math.max(0, km - 1) * d.porKm) * 2) / 2; }
+
+/* ---------- Zona de delivery: máximo del admin, radio de cada negocio y tarifa por provincia ---------- */
+// Tarifa de una provincia ("Dep|Prov"). Si el admin no le puso una, se usa la general.
+function tarifaProv(prov) {
+  const t = (CONF.tarifas || []).find(x => x.prov === prov) || {}, n = v => v === "" || v == null || isNaN(+v) ? null : +v;
+  return { delivery: { ...CONF.delivery, ...(n(t.base) != null ? { base: n(t.base) } : {}), ...(n(t.porKm) != null ? { porKm: n(t.porKm) } : {}) },
+    envio: { ...CONF.envio, ...(n(t.eBase) != null ? { base: n(t.eBase) } : {}), ...(n(t.ePorKm) != null ? { porKm: n(t.ePorKm) } : {}), ...(n(t.eMin) != null ? { minimo: n(t.eMin) } : {}) }, propia: !!t.prov };
+}
+// Máximo del admin: comida y tiendas (15 km) · ferreterías y talleres (50 km)
+const maxKmRubro = rubro => envioGrande(rubro || "comida") ? (+CONF.delivery.maxKmGrande || 50) : (+CONF.delivery.maxKm || 15);
+// Radio del negocio: lo que él puso, sin pasar el máximo del admin
+const radioNeg = n => { const m = maxKmRubro(n && n.rubro), r = +(n && n.radioKm) || 0; return r > 0 ? Math.min(r, m) : m; };
+// Costo del delivery de ESTE negocio hasta el cliente (-1 = no llega)
+const costoNeg = (n, km) => costoDelivery(km, { ...tarifaProv(n && n.prov).delivery, maxKm: radioNeg(n) });
+// ¿Le llega el delivery? true / false / null (aún no sabemos la dirección)
+const llegaDelivery = (n, km) => n.delivery === false ? false : km == null ? null : km <= radioNeg(n);
+// Tiempo estimado: el tiempo del negocio + lo que tarda el repartidor (~2.5 min por km después de los primeros 3 km)
+function tiempoEst(n, km) {
+  const m = String(n.tiempo || "").match(/\d+/g) || ["30", "40"]; let a = +m[0], b = m[1] ? +m[1] : a + 10;
+  if (km != null && km > 3) { const x = Math.round((km - 3) * 2.5 / 5) * 5; a += x; b += x; }
+  return b >= 120 ? `${Math.round(a / 60 * 2) / 2}-${Math.round(b / 60 * 2) / 2} h` : `${a}-${b} min`;
+}
+// A qué repartidores se avisa primero: cada 3 min se amplía (km desde el negocio). Después: toda la provincia.
+const anillosDe = rubro => envioGrande(rubro || "comida") ? [10, 25] : [5, 10];
+const PASO_ANILLO = 3 * 60e3;
+// Hasta dónde llega el aviso ahora mismo (Infinity = toda la provincia)
+function radioAviso(o, ahora = Date.now()) { const an = o.anillos || [5, 10], t = new Date(o.creado || o.buscadoEn || 0).getTime(), i = Math.floor(Math.max(0, ahora - t) / PASO_ANILLO); return i < an.length ? an[i] : Infinity; }
 
 /* ---------- Horario del negocio (hora de Lima) ---------- */
 function estaAbierto(n) {

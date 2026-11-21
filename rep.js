@@ -237,23 +237,36 @@ async function cambiarDisp(on) {
 /* ---------- Ofertas: pedidos libres de mi ciudad ---------- */
 let PARAR_OF = null, VISTOS = null;
 let PARAR_EN = null, VISTOS_E = null;
+// Aviso por distancia: primero los repartidores cerca del negocio (5 km → 10 km; ferretería/talleres 10 → 25 km),
+// cada 3 minutos se amplía y al final toda la provincia. Sin GPS, se ven todos.
+let OFS_T = [], ENVS_T = [], ANILLO_INT = null;
+const enRadio = (o, punto) => { const r = radioAviso(o); return r === Infinity || !POS || !punto || punto.lat == null || distanciaKm(POS, punto) <= r; };
+function filtrarOfertas() {
+  ENVS = ENVS_T.filter(e => enRadio(e, e.origen));
+  const nuevasE = VISTOS_E ? ENVS.filter(e => !VISTOS_E.has(e.id + e.oferta)) : []; VISTOS_E = new Set([...(VISTOS_E || []), ...ENVS.map(e => e.id + e.oferta)]);
+  if (nuevasE.length && ACT.length < MAX_ACT) avisar("📦 Envío de paquete", `${nuevasE[0].origen.dis} → ${nuevasE[0].destino.dis} · ofrecen ${S(nuevasE[0].oferta)}`);
+  OFS = OFS_T.filter(o => enRadio(o, o.negocio && o.negocio.ubic));
+  const nuevas = VISTOS ? OFS.filter(o => !VISTOS.has(o.id + o.creado)) : []; VISTOS = new Set([...(VISTOS || []), ...OFS.map(o => o.id + o.creado)]);
+  if (nuevas.length && ACT.length < MAX_ACT) avisar("🛵 ¡Nuevo pedido!", `${nuevas[0].negocio.nombre} · ganas ${S(nuevas[0].envio)}`);
+}
 function escucharOfertas(on) {
-  if (!on) { if (PARAR_OF) { PARAR_OF(); PARAR_OF = null; } if (PARAR_EN) { PARAR_EN(); PARAR_EN = null; } OFS = []; ENVS = []; VISTOS = VISTOS_E = null; return; }
+  if (!on) { if (PARAR_OF) { PARAR_OF(); PARAR_OF = null; } if (PARAR_EN) { PARAR_EN(); PARAR_EN = null; } clearInterval(ANILLO_INT); ANILLO_INT = null; OFS = []; ENVS = []; OFS_T = []; ENVS_T = []; VISTOS = VISTOS_E = null; return; }
   if (PARAR_OF) return;
+  let listoE = false, listoO = false;
   PARAR_EN = DB.escucharLista("envios", [["prov", "==", REP.prov], ["estado", "==", "buscando"]], l => {
     const lim = Date.now() - BUSQ_MIN * 60e3;
-    ENVS = l.filter(e => puedeEnvio(e, REP.vehiculo) && new Date(e.buscadoEn) > lim);
-    const nuevas = VISTOS_E ? ENVS.filter(e => !VISTOS_E.has(e.id + e.oferta)) : []; VISTOS_E = new Set(ENVS.map(e => e.id + e.oferta));
-    if (nuevas.length && ACT.length < MAX_ACT) avisar("📦 Envío de paquete", `${nuevas[0].origen.dis} → ${nuevas[0].destino.dis} · ofrecen ${S(nuevas[0].oferta)}`);
-    if (TAB === "pedidos") pintarPedidos(true);
+    ENVS_T = l.filter(e => puedeEnvio(e, REP.vehiculo) && new Date(e.buscadoEn) > lim);
+    if (!listoE) { listoE = true; VISTOS_E = new Set(ENVS_T.filter(e => enRadio(e, e.origen)).map(e => e.id + e.oferta)); }
+    filtrarOfertas(); if (TAB === "pedidos") pintarPedidos(true);
   });
   PARAR_OF = DB.escucharLista("ofertas", [["prov", "==", REP.prov], ["estado", "==", "libre"]], l => {
     const lim = Date.now() - 3 * 3600e3;
-    OFS = l.filter(o => puedeLlevar(o, REP.vehiculo) && new Date(o.creado) > lim);
-    const nuevas = VISTOS ? OFS.filter(o => !VISTOS.has(o.id)) : []; VISTOS = new Set(OFS.map(o => o.id));
-    if (nuevas.length && ACT.length < MAX_ACT) avisar("🛵 ¡Nuevo pedido!", `${nuevas[0].negocio.nombre} · ganas ${S(nuevas[0].envio)}`);
-    if (TAB === "pedidos") pintarPedidos(true);
+    OFS_T = l.filter(o => puedeLlevar(o, REP.vehiculo) && new Date(o.creado) > lim);
+    if (!listoO) { listoO = true; VISTOS = new Set(OFS_T.filter(o => enRadio(o, o.negocio && o.negocio.ubic)).map(o => o.id + o.creado)); }
+    filtrarOfertas(); if (TAB === "pedidos") pintarPedidos(true);
   });
+  // Cada 20 s: si el aviso se amplió y ahora me alcanza, aparece (y suena)
+  ANILLO_INT = setInterval(() => { const a = OFS.length + ":" + ENVS.length; filtrarOfertas(); if (a !== OFS.length + ":" + ENVS.length && TAB === "pedidos") pintarPedidos(true); }, 20000);
 }
 function avisar(t, cuerpo) {
   beep(3); navigator.vibrate?.([300, 120, 300]); toast(t + " · " + cuerpo);
@@ -295,7 +308,8 @@ function pintarPedidos(silencioso) {
         ${mio ? `<div class="alert sm">💬 Mandaste tu contraoferta de <b>${S(mio)}</b>. Si el cliente te elige, te avisamos.</div>` : ""}
         <div class="of-b"><button class="btn btn-pri" data-tomarE="${esc(e.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>Aceptar ${S(e.oferta)}</button><button class="btn btn-light" data-contra="${esc(e.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>${mio ? "Cambiar precio" : "Contraofertar"}</button></div></article>`; }).join("")}` : "";
   const html = `${ACT.map(tarjetaActiva).join("")}${htmlEnv}
-    ${on ? `<h2 class="a-t">Pedidos cerca de ti ${ofs.length ? `<b>${ofs.length}</b>` : ""}</h2>${ACT.length >= MAX_ACT ? `<div class="alert">ℹ️ <span>Ya llevas ${MAX_ACT} pedidos. Entrega uno para tomar otro.</span></div>` : ""}
+    ${on ? `<h2 class="a-t">Pedidos cerca de ti ${ofs.length ? `<b>${ofs.length}</b>` : ""}</h2>${OFS_T.length + ENVS_T.length > OFS.length + ENVS.length ? `<p class="muted sm lejos-h">📡 Hay ${OFS_T.length + ENVS_T.length - OFS.length - ENVS.length} pedido(s) más lejos en tu provincia. Primero se avisa a los más cercanos; si nadie lo toma, en unos minutos te aparece.</p>` : ""}
+      ${ACT.length >= MAX_ACT ? `<div class="alert">ℹ️ <span>Ya llevas ${MAX_ACT} pedidos. Entrega uno para tomar otro.</span></div>` : ""}
       ${ofs.map(o => { const d = dist(o); return `<article class="of ${o.vehiculo === "carro" ? "grande" : ""} ${ESP.sel === "o:" + o.id ? "sel" : ""}" data-sel="o:${esc(o.id)}"><div class="of-h"><b>${esc(o.negocio.nombre)}</b><strong>${S(o.envio)}</strong></div>
         <p>🏪 ${esc(o.negocio.direccion || "")}${d != null ? ` · <b>~${d.toFixed(1)} km de ti</b> <small class="muted">en línea recta</small>` : ""}</p><p>🏠 Zona: <b>${esc(o.zona || "—")}</b> · ${o.km ?? "?"} km del negocio al cliente</p>
         <div class="tags">${o.vehiculo === "carro" ? `<span class="st warn">🚗 Envío grande</span>` : o.vehiculo === "moto" ? `<span class="st">🛵 Envío pequeño</span>` : ""}${o.pago === "Efectivo" ? `<span class="st">💵 Efectivo</span>` : `<span class="st ok">Comida pagada (${esc(o.pago)})</span>`}${o.tiempo ? `<span class="st">⏱ Listo en ~${esc(o.tiempo)} min</span>` : ""}<span class="st mute">${hace(o.creado)}</span></div>
@@ -344,7 +358,7 @@ async function tomar(o, btn) {
       set("pedidos", o.id, { repUid: YO.uid, repartidor: { ...pubRep(), etapa: "yendo", tomado: ahora(), ...(POS ? { ubic: { ...POS, t: ahora() } } : {}) }, actualizado: ahora() });
       return true;
     });
-    if (!ok) { toast("Otro repartidor lo tomó primero 😅", true); OFS = OFS.filter(x => x.id !== o.id); return pintarPedidos(); }
+    if (!ok) { toast("Otro repartidor lo tomó primero 😅", true); OFS = OFS.filter(x => x.id !== o.id); OFS_T = OFS_T.filter(x => x.id !== o.id); return pintarPedidos(); }
     beep(1); toast("✅ ¡Es tuyo! Ve al negocio"); scrollTo(0, 0);
   } catch (e) { console.error(e); toast("No se pudo aceptar: " + (e.code || e.message), true); btn.disabled = false; btn.textContent = "Aceptar pedido"; }
 }
@@ -441,12 +455,12 @@ async function tomarEnvio(e, btn) {
   try {
     const ok = await DB.transaccion(async (get, set) => { const x = await get("envios", e.id); if (!x || x.estado !== "buscando") return false;
       set("envios", e.id, { estado: "asignado", repUid: YO.uid, repartidor: { ...pubRep(), tomado: ahora(), ...(POS ? { ubic: { ...POS, t: ahora() } } : {}) }, precio: x.oferta, asignadoEn: ahora(), actualizado: ahora() }); return x.oferta; });
-    if (ok === false) { toast("Otro repartidor lo tomó primero 😅", true); ENVS = ENVS.filter(x => x.id !== e.id); return pintarPedidos(); }
+    if (ok === false) { toast("Otro repartidor lo tomó primero 😅", true); ENVS = ENVS.filter(x => x.id !== e.id); ENVS_T = ENVS_T.filter(x => x.id !== e.id); return pintarPedidos(); }
     beep(1); toast(`✅ ¡Es tuyo por ${S(ok)}! Ve a recoger el paquete`); scrollTo(0, 0);
   } catch (x) { console.error(x); toast("No se pudo aceptar: " + (x.code || x.message), true); btn.disabled = false; btn.textContent = `Aceptar ${S(e.oferta)}`; }
 }
 function contraofertar(e) {
-  if (!e) return; const base = e.oferta, sug = Math.max(base, sugerirEnvio(e.km, e.tamano));
+  if (!e) return; const base = e.oferta, sug = Math.max(base, sugerirEnvio(e.km, e.tamano, tarifaProv(e.prov).envio));
   modal("Tu precio para este envío", `<p>El cliente ofrece <b>${S(base)}</b> por ${e.km} km${e.interprov ? " (interprovincial)" : ""}. Propón tu precio: el cliente ve tu foto, tus estrellas y tu vehículo, y elige.</p>
     <div class="chips-p">${[...new Set([base + 1, base + 2, base + 3, base + 5, sug].map(r2))].sort((a, b) => a - b).map(v => `<button type="button" class="btn btn-light" data-pv="${v}">${S(v)}</button>`).join("")}</div>
     ${fld("precio", "Mi precio (S/)", MISOF[e.id] || r2(base + 2), { type: "number", req: true, extra: `min="${CONF.envio.minimo}" step="0.5" inputmode="decimal"` })}`, async d => {
