@@ -41,6 +41,17 @@ async function fb() {
   FBX = { app: a, fs, au, db: fs.getFirestore(a), auth: au.getAuth(a) }; return FBX;
 }
 let FBST = null;
+const errConsulta = (e, que = "ese número") => { const c = String(e && e.code || ""); return c.includes("not-found") ? `No encontramos ${que}. Revisa el número.` : c.includes("resource-exhausted") ? "Hiciste muchas consultas hoy. Escríbelo a mano." : c.includes("invalid-argument") ? (e.message || "Revisa el número.") : c.includes("unauthenticated") ? "Vuelve a entrar con tu cuenta de Google." : "No se pudo consultar ahora. Puedes escribirlo a mano."; };
+const rucOk = r => /^(10|15|17|20)\d{9}$/.test(String(r || ""));
+// Llamar a una función del servidor (apamuy-servidor). Región us-central1, como el servidor.
+let FBFN = null;
+async function llamarServidor(nombre, data) {
+  if (DEMO) { await new Promise(r => setTimeout(r, 600)); if (nombre === "verificarDni") { if (String(data.dni).startsWith("0000")) { const e = new Error("No encontramos ese DNI"); e.code = "functions/not-found"; throw e; } return { dni: data.dni, nombres: "JUAN CARLOS", apellidos: "QUISPE MAMANI", nombre: "Juan Carlos Quispe Mamani" }; }
+    if (nombre === "verificarRuc") { if (String(data.ruc).startsWith("2000")) { const e = new Error("No encontramos ese RUC"); e.code = "functions/not-found"; throw e; } return { ruc: data.ruc, razonSocial: String(data.ruc).startsWith("10") ? "QUISPE MAMANI JUAN CARLOS" : "INVERSIONES EL SOL S.A.C.", direccion: "AV. EL SOL 123, WANCHAQ - CUSCO - CUSCO", estado: String(data.ruc).endsWith("9") ? "BAJA DE OFICIO" : "ACTIVO", condicion: "HABIDO" }; }
+    return {}; }
+  if (!FBFN) { const f = await fb(), m = await import(`https://www.gstatic.com/firebasejs/${FB_V}/firebase-functions.js`); FBFN = { m, fns: m.getFunctions(f.app, "us-central1") }; }
+  const r = await FBFN.m.httpsCallable(FBFN.fns, nombre, { timeout: 20000 })(data); return r.data;
+}
 async function fbSt() {
   if (FBST) return FBST; const f = await fb(), st = await import(`https://www.gstatic.com/firebasejs/${FB_V}/firebase-storage.js`);
   FBST = { st, storage: st.getStorage(f.app) }; return FBST;
@@ -217,7 +228,7 @@ const CONFIG_BASE = { comision: 10, delivery: { base: 4, porKm: 1, maxKm: 15, ma
   envio: { minimo: 5, base: 5, porKm: 1.2, factorGrande: 1.5, maxKm: 300 } };
 let CONF = { ...CONFIG_BASE };
 function aplicarConfig(c) { c = c || {};
-  CONF = { ...CONFIG_BASE, ...c, delivery: { ...CONFIG_BASE.delivery, ...(c.delivery || {}) }, web: { ...WEB_BASE, ...(c.web || {}) }, rep: { ...CONFIG_BASE.rep, ...(c.rep || {}) }, cobro: { ...CONFIG_BASE.cobro, ...(c.cobro || {}) }, envio: { ...CONFIG_BASE.envio, ...(c.envio || {}) }, tipos: c.tipos || [], tarifas: c.tarifas || [] }; return CONF; }
+  CONF = { ...CONFIG_BASE, ...c, delivery: { ...CONFIG_BASE.delivery, ...(c.delivery || {}) }, web: { ...WEB_BASE, ...(c.web || {}) }, rep: { ...CONFIG_BASE.rep, ...(c.rep || {}) }, cobro: { ...CONFIG_BASE.cobro, ...(c.cobro || {}) }, envio: { ...CONFIG_BASE.envio, ...(c.envio || {}) }, tipos: c.tipos || [], tarifas: c.tarifas || [], verificarDni: !!c.verificarDni }; return CONF; }
 // alCambiar: si la configuración cambió desde la última visita (se avisa después de mostrar la guardada)
 async function cargarConfig(alCambiar) { return aplicarConfig(await rapido("config", () => DB.get("config", "general").then(c => c || {}), c => { aplicarConfig(c); alCambiar && alCambiar(); })); }
 

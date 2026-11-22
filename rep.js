@@ -73,7 +73,8 @@ function registro(prev) {
     const U = window.UBIGEO || {}, op = (l, v) => l.map(x => `<option ${x === v ? "selected" : ""}>${esc(x)}</option>`).join("");
     const C = $("#rC");
     if (paso === 0) C.innerHTML = `<h2>👤 Tus datos</h2><p class="muted">Escríbelos tal como están en tu DNI.</p><div class="g2">
-      ${fld("nombre", "Nombres y apellidos", R.nombre, { req: true, full: true })}${fld("dni", "N° de DNI", R.dni || "", { req: true, extra: 'inputmode="numeric" maxlength="8"' })}${fld("nacimiento", "Fecha de nacimiento", R.nacimiento || "", { type: "date", req: true })}
+      <div class="fld full dni-v"><span>N° de DNI *</span><div class="dni-r"><input name="dni" required inputmode="numeric" maxlength="8" value="${esc(R.dni || "")}" placeholder="8 números">${CONF.verificarDni ? `<button type="button" class="btn btn-pri" id="dniV">${R.dniVerificado === R.dni && R.dni ? "✓ Verificado" : "Verificar"}</button>` : ""}</div>${CONF.verificarDni ? `<small id="dniM" class="${R.dniVerificado === R.dni && R.dni ? "ok-t" : ""}">${R.dniVerificado === R.dni && R.dni ? "✓ DNI verificado con RENIEC" : "Toca «Verificar» y tu nombre se llena solo."}</small>` : ""}</div>
+      ${fld("nombre", "Nombres y apellidos", R.nombre, { req: true, full: true })}${fld("nacimiento", "Fecha de nacimiento", R.nacimiento || "", { type: "date", req: true })}
       ${fld("celular", "Celular (WhatsApp)", R.celular, { type: "tel", req: true, extra: 'inputmode="numeric" maxlength="9"' })}${fld("talla", "Talla de tu casaca", R.talla, { opts: ["S", "M", "L", "XL", "XXL"] })}
       <label class="fld"><span>Departamento donde trabajarás</span><select name="departamento" id="rDep">${op(Object.keys(U).sort(), R.departamento)}</select></label><label class="fld"><span>Provincia (ciudad)</span><select name="provincia" id="rProv"></select></label></div>
       <p class="muted sm">Te llegan los pedidos de los negocios de esa ciudad.</p>`;
@@ -110,6 +111,16 @@ function registro(prev) {
       if (f.type === "application/pdf") { if (f.size > 4 * 1024 * 1024) return toast("El PDF pesa más de 4 MB", true); A[k] = await leerArchivo(f); }
       else A[k] = await redimensionar(f, k === "fotoPerfil" ? 700 : 1400, .8);
       guardar(); pintar(); });
+    // Verificar DNI con RENIEC (lo consulta el servidor; la clave del proveedor nunca llega al celular)
+    if (paso === 0 && $("#dniV")) { const inp = $("[name=dni]", F), b = $("#dniV"), m = $("#dniM");
+      inp.oninput = () => { inp.value = inp.value.replace(/\D/g, "").slice(0, 8); if (R.dniVerificado && inp.value !== R.dniVerificado) { b.textContent = "Verificar"; m.className = ""; m.textContent = "Toca «Verificar» y tu nombre se llena solo."; } };
+      b.onclick = async () => { const dni = inp.value; if (!/^\d{8}$/.test(dni)) { m.className = "err"; m.textContent = "El DNI tiene 8 números."; return; }
+        b.disabled = true; b.textContent = "Consultando…"; m.className = ""; m.textContent = "Consultando en RENIEC…";
+        try { const r = await llamarServidor("verificarDni", { dni }); R.dniVerificado = dni; R.dni = dni; R.nombre = r.nombre; $("[name=nombre]", F).value = r.nombre;
+          b.textContent = "✓ Verificado"; m.className = "ok-t"; m.textContent = `✓ ${r.nombre} · verificado con RENIEC`; }
+        catch (e) { b.textContent = "Verificar"; m.className = "err"; const c = String(e.code || ""); if (!c.includes("not-found") && !c.includes("invalid")) R.dniSinVerificar = dni;   // si el servicio falla, puede seguir (el admin lo ve «sin verificar»)
+          m.textContent = c.includes("not-found") ? "No encontramos ese DNI. Revisa el número." : c.includes("resource-exhausted") ? "Hiciste muchas consultas hoy. Puedes seguir: lo revisaremos a mano." : c.includes("unauthenticated") ? "Vuelve a entrar con tu cuenta de Google." : "No se pudo consultar ahora. Puedes seguir: lo revisaremos a mano."; }
+        b.disabled = false; }; }
     if (paso === 0) { const U = window.UBIGEO || {}, dep = $("#rDep"), pv = () => { const ps = Object.keys(U[dep.value] || {}).sort(); $("#rProv").innerHTML = ps.map(x => `<option ${x === R.provincia ? "selected" : ""}>${esc(x)}</option>`).join(""); }; pv(); dep.onchange = pv; }
     if (paso === 2) { const v = () => { const r = ($("[name=vehiculo]:checked", F) || {}).value; $("#rMot").hidden = r === "bici"; $$("#rMot [required]").forEach(x => x.disabled = r === "bici"); $("[name=marca]", F).closest("label").hidden = r === "bici"; }; $$("[name=vehiculo]", F).forEach(x => x.onchange = v); v(); }
     if (paso === 4) { const dom = R.domicilio || {};
@@ -120,7 +131,7 @@ function registro(prev) {
   };
   // Guarda lo escrito en R antes de cambiar de paso
   const guardar = () => { const d = datosForm(F);
-    if (paso === 0) Object.assign(R, { nombre: d.nombre, dni: d.dni, nacimiento: d.nacimiento, celular: String(d.celular).replace(/\D/g, ""), talla: d.talla, departamento: d.departamento, provincia: d.provincia });
+    if (paso === 0) Object.assign(R, { nombre: d.nombre, dni: String(d.dni).replace(/\D/g, ""), nacimiento: d.nacimiento, celular: String(d.celular).replace(/\D/g, ""), talla: d.talla, departamento: d.departamento, provincia: d.provincia });
     if (paso === 2) Object.assign(R, { marca: d.vehiculo === "bici" ? "" : d.marca, color: d.color, vehiculo: d.vehiculo || R.vehiculo, placa: (d.placa || "").toUpperCase(), licencia: (d.licencia || "").toUpperCase(), soatVence: d.soatVence });
     if (paso === 4) { R.domicilio = { ...(R.domicilio || {}), texto: d.dir, referencia: d.ref }; const c = R.domicilio.lat != null ? ciudadCercana(R.domicilio) : null; if (c) R.domicilio.distrito = c.dis; }
     if (paso === 5) { R.acepto = d.acepto; R.consentimiento = d.consentimiento; if (firma && !firma.vacia()) R.firmaData = firma.dato(); }
@@ -128,7 +139,7 @@ function registro(prev) {
   };
   const validar = () => {
     const req = $$("[required]:not(:disabled)", F).find(x => !String(x.value).trim()); if (req) { req.focus(); return "Completa: " + req.closest("label").querySelector("span").textContent.replace(" *", ""); }
-    if (paso === 0) { if (!/^\d{8}$/.test(R.dni)) return "El DNI tiene 8 números."; if (R.celular.length !== 9) return "El celular tiene 9 números.";
+    if (paso === 0) { if (!/^\d{8}$/.test(R.dni)) return "El DNI tiene 8 números."; if (CONF.verificarDni && R.dniVerificado !== R.dni && R.dniSinVerificar !== R.dni) return "Toca «Verificar» para validar tu DNI."; if (R.celular.length !== 9) return "El celular tiene 9 números.";
       const ed = (Date.now() - new Date(R.nacimiento + "T12:00:00")) / 31557600000; if (!(ed >= 18)) return "Debes ser mayor de 18 años para repartir."; }
     if (paso === 1) { if (!A.fotoPerfil) return "Falta tu foto de perfil."; if (!A.dniFrente || !A.dniReverso) return "Faltan las fotos de tu DNI (adelante y atrás)."; }
     if (paso === 2) { if (R.vehiculo !== "bici" && !R.marca) return "Escribe la marca de tu vehículo."; if (R.vehiculo !== "bici") { if (!A.soatFoto) return "Falta la foto del SOAT."; if (!A.licenciaFoto) return "Falta la foto de tu licencia."; if (R.soatVence < HOY()) return "Tu SOAT está vencido. Necesitas un SOAT vigente."; } if (!A.vehiculoFoto) return "Falta la foto de tu vehículo."; }
@@ -148,7 +159,7 @@ function registro(prev) {
       const fotoPerfil = await subirFoto(`perfiles/${YO.uid}/foto-${t}.jpg`, A.fotoPerfil);
       const firmaR = await subirPrivado(`repartidores/${YO.uid}/firma-${t}.png`, R.firmaData), cap = await sub("casacaCap", "jpg");
       const c = ciudadCercana(R.domicilio) || {};
-      const data = { nombre: R.nombre, dni: R.dni, nacimiento: R.nacimiento, celular: R.celular, email: YO.email, talla: R.talla, departamento: R.departamento, provincia: R.provincia, prov: provKey(R.departamento, R.provincia),
+      const data = { nombre: R.nombre, dni: R.dni, ...(R.dniVerificado === R.dni ? { dniVerificado: R.dni } : {}), nacimiento: R.nacimiento, celular: R.celular, email: YO.email, talla: R.talla, departamento: R.departamento, provincia: R.provincia, prov: provKey(R.departamento, R.provincia),
         vehiculo: R.vehiculo, marca: R.marca || "", color: R.color || "", fotoPerfil, placa: R.vehiculo === "bici" ? "" : R.placa, licencia: R.vehiculo === "bici" ? "" : R.licencia, soatVence: R.vehiculo === "bici" ? "" : R.soatVence, ...up,
         domicilio: { texto: R.domicilio.texto, referencia: R.domicilio.referencia || "", lat: R.domicilio.lat, lng: R.domicilio.lng, distrito: R.domicilio.distrito || c.dis || "" },
         firma: firmaR, declaracion: { version: 1, fecha: ahora(), comision: pctRep() }, consentimiento: true, casaca: { monto: +CONF.rep.casaca, operacion: R.casaca.operacion, captura: cap, talla: R.talla },
