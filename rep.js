@@ -125,7 +125,7 @@ function registro(prev) {
     if (paso === 2) { const v = () => { const r = ($("[name=vehiculo]:checked", F) || {}).value; $("#rMot").hidden = r === "bici"; $$("#rMot [required]").forEach(x => x.disabled = r === "bici"); $("[name=marca]", F).closest("label").hidden = r === "bici"; }; $$("[name=vehiculo]", F).forEach(x => x.onchange = v); v(); }
     if (paso === 4) { const dom = R.domicilio || {};
       mapaPin($("#rMapa"), dom.lat != null ? dom : centroDe(R.departamento, R.provincia), q => R.domicilio = { ...(R.domicilio || {}), lat: q.lat, lng: q.lng }, { txt: "🏠" }).then(m => MP = m);
-      $("#rGps").onclick = async () => { $("#rGps").disabled = true; try { const p = await miUbicacion(); MP && MP.mover(p); toast("Listo · revisa que el pin esté en tu casa"); } catch (e) { toast("Activa el GPS y da permiso de ubicación", true); } $("#rGps").disabled = false; }; }
+      $("#rGps").onclick = async () => { $("#rGps").disabled = true; try { const p = await miUbicacion(); MP && MP.mover(p); toast("Listo · revisa que el pin esté en tu casa"); } catch (e) { avisarUbicacion(e); } $("#rGps").disabled = false; }; }
     if (paso === 5) firma = padFirma($("#rFirma"), R.firmaData || "");
     if (paso === 5) $("#rBorrar").onclick = () => firma.borrar();
   };
@@ -240,7 +240,7 @@ async function cambiarDisp(on) {
   if (on && bloqueado()) { estadoDisp(); return pagar(); }
   if (on && soatVencido(REP)) { estadoDisp(); TAB = "perfil"; return pintarTab(); }
   if (on && estadoAvisos() !== "ok") activarAvisos("rep").then(r => { if (r !== "ok" && r !== "demo") toast(textoAvisos(r), true); pintarTab(); });
-  if (on) { try { POS = await miUbicacion(); } catch (e) { toast("Activa el GPS para recibir pedidos cerca de ti", true); } }
+  if (on) { try { POS = await miUbicacion(); } catch (e) { avisarUbicacion(e); } }
   REP.disponible = on; await DB.set("repartidores", YO.uid, { disponible: on, ...(POS ? { ubic: { ...POS, t: ahora() } } : {}) });
   despierto(on || ACT.length > 0); estadoDisp(); toast(on ? "🟢 Estás disponible: te avisaremos de los pedidos" : "Desconectado"); pintarTab();
 }

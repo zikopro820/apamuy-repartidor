@@ -367,7 +367,28 @@ async function mapaPuntos(el, puntos) {
   pintar(puntos); setTimeout(() => m.invalidateSize(), 200);
   return { mapa: m, pintar };
 }
-function miUbicacion() { return new Promise((ok, no) => { if (!navigator.geolocation) return no(new Error("sin GPS")); navigator.geolocation.getCurrentPosition(p => ok({ lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6) }), no, { enableHighAccuracy: true, timeout: 15000 }); }); }
+/* ---------- Ubicación del celular ----------
+   1) GPS preciso (7 s). 2) Si tarda (dentro de casa, GPS sin señal), la ubicación rápida por WiFi/red.
+   Antes solo esperaba al GPS fino: dentro de casa se vencía y decía «Activa el GPS» aunque estuviera prendido. */
+const geoUna = o => new Promise((ok, no) => navigator.geolocation.getCurrentPosition(ok, no, o));
+async function miUbicacion() {
+  if (!navigator.geolocation || !window.isSecureContext) throw Object.assign(new Error("Este navegador no permite ubicación"), { code: 0 });
+  const fmt = p => ({ lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6), prec: Math.round(p.coords.accuracy || 0) });
+  try { return fmt(await geoUna({ enableHighAccuracy: true, timeout: 7000, maximumAge: 30000 })); }
+  catch (e) { if (e && e.code === 1) throw e; }   // 1 = el navegador no tiene permiso: no insistir
+  return fmt(await geoUna({ enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 }));
+}
+// Mensaje claro según el error (permiso del navegador ≠ GPS apagado ≠ sin señal)
+function avisarUbicacion(e) {
+  if (e && e.code === 1) {
+    const html = `<p>El GPS de tu celular está prendido, pero <b>el navegador no tiene permiso</b> para usar tu ubicación en Apamuy.</p>
+      <ol class="pasos-ub"><li>Toca el <b>candado 🔒</b> (o los <b>3 puntos ⋮</b>) junto a la dirección web.</li><li>Entra a <b>Permisos</b> o <b>Configuración del sitio</b>.</li><li>En <b>Ubicación</b> elige <b>Permitir</b>.</li><li>Vuelve y toca otra vez <b>«Usar mi ubicación»</b>.</li></ol>
+      <p class="muted sm">Si usas Apamuy instalada como app: Ajustes del celular → Aplicaciones → Chrome → Permisos → Ubicación → <b>Permitir</b>.</p>`;
+    if (typeof hoja === "function") { hoja(`<button class="x" data-cerrar aria-label="Cerrar">×</button><div class="up"><h2>Da permiso de ubicación</h2>${html}<button type="button" class="btn btn-red btn-lg" data-cerrar>Entendido</button></div>`); return; }
+    if (typeof modal === "function") { modal("Da permiso de ubicación", html, null); return; }
+  }
+  toast(e && e.code === 0 ? "Este navegador no permite usar la ubicación. Mueve el pin en el mapa." : "No pudimos encontrar tu ubicación ahora. Acércate a una ventana o mueve el pin en el mapa hasta tu puerta.", true);
+}
 
 /* ---------- Pedidos ---------- */
 const EST_P = { "por-validar": ["Pago por validar", "warn"], nuevo: ["Nuevo", "pri"], cocina: ["Preparando", "fire"], listo: ["Listo", "info"], camino: ["En camino", "info"], entregado: ["Entregado", "ok"], rechazado: ["Pago rechazado", "bad"], anulado: ["Anulado", "bad"] };
