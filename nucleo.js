@@ -292,6 +292,14 @@ const PASO_ANILLO = 3 * 60e3;
 // Hasta dónde llega el aviso ahora mismo (Infinity = toda la provincia)
 function radioAviso(o, ahora = Date.now()) { const an = o.anillos || [5, 10], t = new Date(o.creado || o.buscadoEn || 0).getTime(), i = Math.floor(Math.max(0, ahora - t) / PASO_ANILLO); return i < an.length ? an[i] : Infinity; }
 
+/* ---------- Precio antes (descuento) y estrellas de los negocios ---------- */
+// -20% si el negocio puso «precio antes» mayor al precio actual
+const dtoDe = p => { const a = +p.precioAntes, v = +p.precio; return a > v && v > 0 ? Math.round((1 - v / a) * 100) : 0; };
+const precioHTML = (p, desde) => { const d = dtoDe(p); return `<span class="pz"><b>${desde ? "Desde " : ""}${S(p.precio)}</b>${d ? `<span class="pz-d">-${d}%</span><s>${S(p.precioAntes)}</s>` : ""}</span>`; };
+// Calificación que dan los clientes al negocio (promedio de 1 a 5)
+const estNeg = n => { const c = +(n && n.estrellasN) || 0; return c ? { prom: Math.round((+n.estrellasSum || 0) / c * 10) / 10, c } : null; };
+const estrellasNeg = n => { const e = estNeg(n); return e ? `<span class="rt"><i>★</i> ${e.prom.toFixed(1)} <small>(${e.c})</small></span>` : `<span class="rt nuevo">Nuevo</span>`; };
+
 /* ---------- Etapa 3: comisión semanal de los negocios ----------
    Semana de lunes a domingo. Se cierra el lunes y hay 2 días para pagar (hasta el miércoles 23:59).
    Si las ventas de la semana no llegan a S/ 30, no se cobra: se acumula para la siguiente. */
