@@ -1,5 +1,5 @@
 /* App instalable del repartidor. Los pedidos siempre se piden en vivo (Firebase). */
-const V = "apamuy-rep-v11";
+const V = "apamuy-rep-v13";
 const CASCARA = ["./", "index.html", "rep.css", "rep.js", "nucleo.js", "ui.js", "demo.js", "semilla.js", "ubigeo.js", "firebase-config.js", "favicon.svg", "img/icon-192.png", "manifest.webmanifest"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(V).then(c => c.addAll(CASCARA)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
