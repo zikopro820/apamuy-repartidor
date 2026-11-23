@@ -316,8 +316,8 @@ function pintarPedidos(silencioso) {
       return `<article class="of env ${ESP.sel === "e:" + e.id ? "sel" : ""}" data-sel="e:${esc(e.id)}"><div class="of-h"><b>${esc(TAM[e.tamano]?.[0] || "Paquete")}</b><strong>${S(e.oferta)}</strong></div>
         <p><span class="lg a">A</span> ${esc(e.origen.dis)}${d != null ? ` · <b>~${d.toFixed(1)} km de ti</b> <small class="muted">en línea recta</small>` : ""}</p><p><span class="lg b">B</span> ${esc(e.destino.dis)}${e.interprov ? `, ${esc(e.destino.provincia)}` : ""} · ${e.km} km de viaje</p>
         <div class="tags">${e.interprov ? `<span class="st warn">🚩 Interprovincial</span>` : ""}<span class="st">${esc(e.contenido)}</span><span class="st">${e.paga === "recibe" ? "Paga quien recibe" : "Pagan al recoger"}</span><span class="st mute">${hace(e.buscadoEn)}</span></div>
-        ${mio ? `<div class="alert sm">💬 Mandaste tu contraoferta de <b>${S(mio)}</b>. Si el cliente te elige, te avisamos.</div>` : ""}
-        <div class="of-b"><button class="btn btn-pri" data-tomarE="${esc(e.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>Aceptar ${S(e.oferta)}</button><button class="btn btn-light" data-contra="${esc(e.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>${mio ? "Cambiar precio" : "Contraofertar"}</button></div></article>`; }).join("")}` : "";
+        ${mio ? `<div class="alert sm">⏳ Enviaste <b>${S(mio)}</b>. El cliente ve tu distancia y elige: si te elige, te avisamos con sonido.</div>` : ""}
+        <div class="of-b">${mio === e.oferta ? `<button class="btn btn-pri" disabled>Esperando al cliente…</button>` : `<button class="btn btn-pri" data-tomarE="${esc(e.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>Aceptar ${S(e.oferta)}</button>`}<button class="btn btn-light" data-contra="${esc(e.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>${mio ? "Cambiar precio" : "Contraofertar"}</button></div></article>`; }).join("")}` : "";
   const html = `${ACT.map(tarjetaActiva).join("")}${htmlEnv}
     ${on ? `<h2 class="a-t">Pedidos cerca de ti ${ofs.length ? `<b>${ofs.length}</b>` : ""}</h2>${OFS_T.length + ENVS_T.length > OFS.length + ENVS.length ? `<p class="muted sm lejos-h">📡 Hay ${OFS_T.length + ENVS_T.length - OFS.length - ENVS.length} pedido(s) más lejos en tu provincia. Primero se avisa a los más cercanos; si nadie lo toma, en unos minutos te aparece.</p>` : ""}
       ${ACT.length >= MAX_ACT ? `<div class="alert">ℹ️ <span>Ya llevas ${MAX_ACT} pedidos. Entrega uno para tomar otro.</span></div>` : ""}
@@ -460,15 +460,16 @@ async function pintarPerfil() {
 }
 
 /* ---------- Envíos de paquetes: aceptar, contraofertar y llevar ---------- */
+// Como inDrive: aceptar el precio NO asigna al instante. Se envía como respuesta y el cliente elige (ve la distancia en su mapa).
+const ubicAprox = () => POS ? { lat: Math.round(POS.lat * 1000) / 1000, lng: Math.round(POS.lng * 1000) / 1000 } : null;   // ~100 m, por privacidad
 async function tomarEnvio(e, btn) {
   if (!e) return; if (ACT.length >= MAX_ACT) return toast(`Entrega uno de tus ${MAX_ACT} pedidos primero`, true);
-  btn.disabled = true; btn.textContent = "Aceptando…";
+  btn.disabled = true; btn.textContent = "Enviando…";
   try {
-    const ok = await DB.transaccion(async (get, set) => { const x = await get("envios", e.id); if (!x || x.estado !== "buscando") return false;
-      set("envios", e.id, { estado: "asignado", repUid: YO.uid, repartidor: { ...pubRep(), tomado: ahora(), ...(POS ? { ubic: { ...POS, t: ahora() } } : {}) }, precio: x.oferta, asignadoEn: ahora(), actualizado: ahora() }); return x.oferta; });
-    if (ok === false) { toast("Otro repartidor lo tomó primero 😅", true); ENVS = ENVS.filter(x => x.id !== e.id); ENVS_T = ENVS_T.filter(x => x.id !== e.id); return pintarPedidos(); }
-    beep(1); toast(`✅ ¡Es tuyo por ${S(ok)}! Ve a recoger el paquete`); scrollTo(0, 0);
-  } catch (x) { console.error(x); toast("No se pudo aceptar: " + (x.code || x.message), true); btn.disabled = false; btn.textContent = `Aceptar ${S(e.oferta)}`; }
+    await DB.set(`envios/${e.id}/ofertas`, YO.uid, { repUid: YO.uid, precio: e.oferta, acepta: true, rep: pubRep(), ubic: ubicAprox(), dist: POS ? r2(distanciaKm(POS, e.origen)) : null, creado: ahora() }, false);
+    MISOF[e.id] = e.oferta; store.set("am_misof", MISOF); beep(1);
+    toast(`Aceptaste ${S(e.oferta)}. El cliente elige entre los repartidores cercanos: si te elige, te avisamos con sonido`); pintarPedidos();
+  } catch (x) { console.error(x); toast(x.code === "permission-denied" ? "Este envío ya tiene repartidor" : "No se pudo enviar: " + (x.code || x.message), true); btn.disabled = false; btn.textContent = `Aceptar ${S(e.oferta)}`; }
 }
 function contraofertar(e) {
   if (!e) return; const base = e.oferta, sug = Math.max(base, sugerirEnvio(e.km, e.tamano, tarifaProv(e.prov).envio));
@@ -476,7 +477,7 @@ function contraofertar(e) {
     <div class="chips-p">${[...new Set([base + 1, base + 2, base + 3, base + 5, sug].map(r2))].sort((a, b) => a - b).map(v => `<button type="button" class="btn btn-light" data-pv="${v}">${S(v)}</button>`).join("")}</div>
     ${fld("precio", "Mi precio (S/)", MISOF[e.id] || r2(base + 2), { type: "number", req: true, extra: `min="${CONF.envio.minimo}" step="0.5" inputmode="decimal"` })}`, async d => {
     const pr = r2(d.precio); if (!(pr >= CONF.envio.minimo)) { toast(`Mínimo ${S(CONF.envio.minimo)}`, true); return false; } if (pr > 3000) { toast("Ese precio es muy alto", true); return false; }
-    await DB.set(`envios/${e.id}/ofertas`, YO.uid, { repUid: YO.uid, precio: pr, rep: pubRep(), dist: POS ? r2(distanciaKm(POS, e.origen)) : null, creado: ahora() }, false);
+    await DB.set(`envios/${e.id}/ofertas`, YO.uid, { repUid: YO.uid, precio: pr, acepta: pr === base, rep: pubRep(), ubic: ubicAprox(), dist: POS ? r2(distanciaKm(POS, e.origen)) : null, creado: ahora() }, false);
     MISOF[e.id] = pr; store.set("am_misof", MISOF); toast(`💬 Enviaste ${S(pr)}. Si te elige, te avisamos con sonido`); pintarPedidos(); }, "Enviar mi precio", { alAbrir: F => {
     F.onclick = ev => { const b = ev.target.closest("[data-pv]"); if (b) $("[name=precio]", F).value = b.dataset.pv; }; } });
 }

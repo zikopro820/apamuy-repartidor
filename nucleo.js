@@ -362,8 +362,8 @@ async function mapaPuntos(el, puntos) {
   el.innerHTML = "";
   const m = L.map(el, { zoomControl: false }); L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(m);
   const capa = L.layerGroup().addTo(m);
-  const pintar = ps => { capa.clearLayers(); const ok = ps.filter(x => x && x.lat != null); ok.forEach(x => L.marker([x.lat, x.lng], { icon: pinIcono(L, x.color, x.txt) }).addTo(capa));
-    if (ok.length > 1) m.fitBounds(ok.map(x => [x.lat, x.lng]), { padding: [40, 40], maxZoom: 16 }); else if (ok[0]) m.setView([ok[0].lat, ok[0].lng], 16); };
+  const pintar = ps => { capa.clearLayers(); const ok = ps.filter(x => x && x.lat != null); ok.forEach(x => { const mk = L.marker([x.lat, x.lng], { icon: x.html ? L.divIcon({ className: "am-mk", html: x.html, iconSize: x.tam || [60, 60], iconAnchor: x.ancla || [30, 30] }) : pinIcono(L, x.color, x.txt), zIndexOffset: x.z || 0 }).addTo(capa); if (x.click) mk.on("click", x.click); });
+    if (ok.length > 1) m.fitBounds(ok.map(x => [x.lat, x.lng]), { padding: [50, 50], maxZoom: 16 }); else if (ok[0]) m.setView([ok[0].lat, ok[0].lng], 15); };
   pintar(puntos); setTimeout(() => m.invalidateSize(), 200);
   return { mapa: m, pintar };
 }
@@ -391,26 +391,20 @@ async function buscarUbic(largo) {
   throw err && err.code ? err : Object.assign(new Error("timeout"), { code: 3 });
 }
 // Mensaje claro según el error (permiso del navegador ≠ GPS apagado ≠ sin señal)
-function avisarUbicacion(e) {
+/* Aviso con UN solo botón «Activar ubicación»: al tocarlo se pide la ubicación (sale la ventanita del celular). */
+async function avisarUbicacion(e) {
+  const c = e && e.code;
+  if (c !== 1 && c !== 2 && c !== 3) return toast("Este navegador no permite usar la ubicación. Elige tu punto en el mapa.", true);
+  const bloqueado = c === 1 && (await permisoUbic()) === "denied";
   const app = matchMedia("(display-mode: standalone)").matches || document.referrer.startsWith("android-app://");
-  const c = e && e.code, pin = `<button type="button" class="btn btn-light btn-lg" data-cerrar>Mover el pin a mano</button>`;
-  let tit, html, btn;
-  if (c === 1) {
-    tit = "Da permiso de ubicación"; btn = "Pedir permiso";
-    html = `<p><b>Apamuy necesita permiso</b> para usar tu ubicación. Toca <b>«Pedir permiso»</b> y elige <b>Permitir</b>.</p>
-      <p class="muted sm">¿No aparece la ventanita? Actívalo a mano:</p>` + (app
-      ? `<ol class="pasos-ub"><li><b>Ajustes</b> del celular → <b>Aplicaciones</b> → <b>Apamuy</b>.</li><li><b>Permisos</b> → <b>Ubicación</b> → <b>Permitir mientras se usa la app</b>.</li><li>Si sigue igual, haz lo mismo con <b>Chrome</b>.</li><li>Vuelve a Apamuy: <b>se actualiza sola</b>.</li></ol>`
-      : `<ol class="pasos-ub"><li>Toca el <b>candado 🔒</b> (o los <b>3 puntos ⋮</b>) junto a la dirección web.</li><li><b>Permisos</b> o <b>Configuración del sitio</b> → <b>Ubicación</b> → <b>Permitir</b>.</li><li>Vuelve aquí: <b>se actualiza sola</b>.</li></ol>`);
-  } else if (c === 2) {
-    tit = "No pudimos ubicarte"; btn = "Buscar otra vez";
-    html = `<p>Tu celular no nos dio la ubicación. Revisa:</p><ol class="pasos-ub"><li>Que la <b>Ubicación 📍</b> esté prendida (desliza desde arriba).</li><li>En <b>Ajustes → Ubicación</b>, activa <b>Precisión de ubicación de Google</b> (o «Mejorar precisión»).</li><li>En <b>Ajustes → Aplicaciones → Apamuy → Permisos → Ubicación</b>, activa <b>Usar ubicación precisa</b>.</li></ol><p class="muted sm">Luego toca «Buscar otra vez». Al volver a Apamuy también se actualiza sola.</p>`;
-  } else if (c === 3) {
-    tit = "Aún no te encontramos"; btn = "Buscar otra vez";
-    html = `<p>Tu celular está tardando en encontrar tu ubicación (pasa dentro de casa o con poca señal).</p><ol class="pasos-ub"><li>Revisa que la <b>Ubicación 📍</b> esté prendida y, si puedes, el <b>wifi</b> (ayuda a ubicarte más rápido).</li><li>Toca <b>«Buscar otra vez»</b> y espera unos segundos.</li></ol><p class="muted sm">O mueve el pin en el mapa hasta tu puerta.</p>`;
-  } else return toast("Este navegador no permite usar la ubicación. Mueve el pin en el mapa.", true);
-  if (typeof hoja === "function") { hoja(`<button class="x" data-cerrar aria-label="Cerrar">×</button><div class="up ubic-h"><h2>${tit}</h2>${html}<button type="button" class="btn btn-red btn-lg" data-ubre>${btn}</button>${pin}</div>`); return; }
-  if (typeof modal === "function") { modal(tit, html, null); return; }
-  toast(tit, true);
+  const nota = !bloqueado ? "" : `<p class="ub-nota">Está bloqueada. ${app ? "Mantén presionado el ícono de Apamuy → <b>Configuración</b> → <b>Ubicación</b> → <b>Permitir</b>." : "Toca el candado 🔒 de arriba → <b>Ubicación</b> → <b>Permitir</b>."}</p>`;
+  if (typeof hoja === "function") {
+    hoja(`<button class="x" data-cerrar aria-label="Cerrar">×</button><div class="up ubic-h"><div class="ub-ico">📍</div><h2>Activa tu ubicación</h2>
+      <button type="button" class="btn btn-red btn-lg" data-ubre>Activar ubicación</button>${nota}</div>`);
+    return;
+  }
+  if (typeof modal === "function") { modal("Activa tu ubicación", nota || "<p>Toca «Activar ubicación» y elige Permitir.</p>", null); return; }
+  toast("Activa tu ubicación", true);
 }
 /* Pide la ubicación y, si falta permiso o GPS, la vuelve a intentar SOLA cuando la persona lo activa y regresa a la app */
 let UB_PEND = null;
