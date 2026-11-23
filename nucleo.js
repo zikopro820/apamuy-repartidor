@@ -371,24 +371,24 @@ async function mapaPuntos(el, puntos) {
    1) GPS preciso (7 s). 2) Si tarda (dentro de casa, GPS sin señal), la ubicación rápida por WiFi/red.
    Antes solo esperaba al GPS fino: dentro de casa se vencía y decía «Activa el GPS» aunque estuviera prendido. */
 const geoUna = o => new Promise((ok, no) => navigator.geolocation.getCurrentPosition(ok, no, o));
-/* Busca la ubicación con el GPS y con la red (wifi/antenas) A LA VEZ y usa la primera buena.
-   Así funciona en la app de Play Store y en Chrome, también dentro de casa o en celulares lentos. */
+/* Busca la ubicación UNA petición a la vez (la app de Play Store falla si se piden dos a la vez),
+   alternando GPS preciso y ubicación por red, y reintentando antes de rendirse. */
+let UB_BUSCA = null;
 function miUbicacion(largo) {
   if (!navigator.geolocation || !window.isSecureContext) return Promise.reject(Object.assign(new Error("Este navegador no permite ubicación"), { code: 0 }));
+  return UB_BUSCA || (UB_BUSCA = buscarUbic(largo).finally(() => { UB_BUSCA = null; }));
+}
+async function buscarUbic(largo) {
   const fmt = p => ({ lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6), prec: Math.round(p.coords.accuracy || 0) });
-  const T = largo ? 35000 : 22000, G = navigator.geolocation;
-  return new Promise((ok, no) => {
-    let fin = false, mejor = null, err = null, sinGps = 0; const ids = [], ts = [];
-    const acabar = (pos, e) => { if (fin) return; fin = true; ids.forEach(i => { try { G.clearWatch(i); } catch (x) {} }); ts.forEach(clearTimeout); pos ? ok(fmt(pos)) : no(e || Object.assign(new Error("timeout"), { code: 3 })); };
-    const enPos = p => { if (!mejor || p.coords.accuracy < mejor.coords.accuracy) mejor = p; if (p.coords.accuracy <= 50) acabar(mejor); };
-    const enErr = e => { err = e; if (e.code === 1) return acabar(null, e); if (e.code === 2 && ++sinGps >= 2 && !mejor) acabar(null, e); };
-    try {
-      ids.push(G.watchPosition(enPos, enErr, { enableHighAccuracy: true, maximumAge: 0, timeout: T }));
-      ids.push(G.watchPosition(enPos, enErr, { enableHighAccuracy: false, maximumAge: 600000, timeout: T }));
-    } catch (e) { return acabar(null, Object.assign(new Error("Sin ubicación"), { code: 0 })); }
-    ts.push(setTimeout(() => { if (mejor) acabar(mejor); }, 7000));          // ya hay una aproximada: esperamos un poco por una mejor
-    ts.push(setTimeout(() => acabar(mejor, err && err.code !== 3 ? err : null), T));
-  });
+  const fin = Date.now() + (largo ? 45000 : 28000), espera = ms => new Promise(r => setTimeout(r, ms));
+  const pasos = [{ h: true, t: 8000, m: 30000 }, { h: false, t: 10000, m: 600000 }, { h: true, t: 15000, m: 0 }, { h: false, t: 15000, m: 900000 }];
+  let err = null;
+  for (let i = 0; i < (largo ? 8 : 6); i++) {             // si el celular aún está «calentando» el GPS, reintenta con pausas
+    const p = pasos[i % pasos.length], resta = fin - Date.now(); if (resta < 2000) break;
+    try { return fmt(await geoUna({ enableHighAccuracy: p.h, timeout: Math.min(p.t, resta), maximumAge: p.m })); }
+    catch (e) { err = e; if (e && e.code === 1) throw e; await espera(1500); }
+  }
+  throw err && err.code ? err : Object.assign(new Error("timeout"), { code: 3 });
 }
 // Mensaje claro según el error (permiso del navegador ≠ GPS apagado ≠ sin señal)
 function avisarUbicacion(e) {
@@ -402,8 +402,8 @@ function avisarUbicacion(e) {
       ? `<ol class="pasos-ub"><li><b>Ajustes</b> del celular → <b>Aplicaciones</b> → <b>Apamuy</b>.</li><li><b>Permisos</b> → <b>Ubicación</b> → <b>Permitir mientras se usa la app</b>.</li><li>Si sigue igual, haz lo mismo con <b>Chrome</b>.</li><li>Vuelve a Apamuy: <b>se actualiza sola</b>.</li></ol>`
       : `<ol class="pasos-ub"><li>Toca el <b>candado 🔒</b> (o los <b>3 puntos ⋮</b>) junto a la dirección web.</li><li><b>Permisos</b> o <b>Configuración del sitio</b> → <b>Ubicación</b> → <b>Permitir</b>.</li><li>Vuelve aquí: <b>se actualiza sola</b>.</li></ol>`);
   } else if (c === 2) {
-    tit = "Activa tu ubicación"; btn = "Ya la activé";
-    html = `<p>La <b>ubicación (GPS)</b> de tu celular está apagada.</p><ol class="pasos-ub"><li>Desliza desde <b>arriba</b> de la pantalla.</li><li>Toca el ícono <b>Ubicación 📍</b> para prenderlo.</li><li>Vuelve a Apamuy: <b>se actualiza sola</b>.</li></ol>`;
+    tit = "No pudimos ubicarte"; btn = "Buscar otra vez";
+    html = `<p>Tu celular no nos dio la ubicación. Revisa:</p><ol class="pasos-ub"><li>Que la <b>Ubicación 📍</b> esté prendida (desliza desde arriba).</li><li>En <b>Ajustes → Ubicación</b>, activa <b>Precisión de ubicación de Google</b> (o «Mejorar precisión»).</li><li>En <b>Ajustes → Aplicaciones → Apamuy → Permisos → Ubicación</b>, activa <b>Usar ubicación precisa</b>.</li></ol><p class="muted sm">Luego toca «Buscar otra vez». Al volver a Apamuy también se actualiza sola.</p>`;
   } else if (c === 3) {
     tit = "Aún no te encontramos"; btn = "Buscar otra vez";
     html = `<p>Tu celular está tardando en encontrar tu ubicación (pasa dentro de casa o con poca señal).</p><ol class="pasos-ub"><li>Revisa que la <b>Ubicación 📍</b> esté prendida y, si puedes, el <b>wifi</b> (ayuda a ubicarte más rápido).</li><li>Toca <b>«Buscar otra vez»</b> y espera unos segundos.</li></ol><p class="muted sm">O mueve el pin en el mapa hasta tu puerta.</p>`;
