@@ -8,10 +8,12 @@ let YO = null, REP = null, TAB = "pedidos", ACT = [], OFS = [], POS = null, PAGO
 let ACTP = [], ACTE = [], ENVS = [], REPP = null, PRIV = {}, MISOF = store.get("am_misof", {});   // pedidos y envíos en curso, envíos libres, mi perfil público
 const BUSQ_MIN = 10;
 // Lo que ve el cliente del repartidor: foto aprobada, nombre corto, vehículo, placa y estrellas. Nunca DNI ni domicilio.
-const pubRep = () => ({ uid: YO.uid, nombre: REP.nombre.split(" ").slice(0, 2).join(" "), celular: REP.celular, foto: (REPP && REPP.foto) || "", vehiculo: REP.vehiculo, marca: REP.marca || "", color: REP.color || "", placa: REP.placa || "",
+const pubRep = () => ({ uid: YO.uid, nombre: REP.nombre.split(" ").slice(0, 2).join(" "), celular: REP.celular, foto: (REPP && REPP.foto) || "", vehiculo: REP.vehiculo, marca: REP.marca || "", color: REP.color || "", placa: REP.placa || "", ...(esCarga(REP.vehiculo) ? { capacidad: REP.capacidad || "", ayudantes: +REP.ayudantes || 0 } : {}),
   entregas: (REPP && REPP.entregas) || 0, estrellas: promEstrellas(REPP), nCal: (REPP && REPP.estrellasN) || 0 });
 const colDe = x => x._t === "e" ? "envios" : "pedidos";
-function juntarAct() { ACT = [...ACTP, ...ACTE].sort((a, b) => String(a.repartidor?.tomado || a.asignadoEn).localeCompare(b.repartidor?.tomado || b.asignadoEn)); despierto(true); gps(); syncRastreos(); if (TAB === "pedidos") pintarPedidos(true); }
+let AGEN = [];   // mudanzas programadas confirmadas (aún no empiezan)
+const esAgendada = e => e.tipo === "mudanza" && e.programado && e.estado === "asignado" && new Date(e.programado) - Date.now() > 2 * 3600e3;
+function juntarAct() { AGEN = ACTE.filter(esAgendada); ACT = [...ACTP, ...ACTE.filter(e => !esAgendada(e))].sort((a, b) => String(a.repartidor?.tomado || a.asignadoEn).localeCompare(b.repartidor?.tomado || b.asignadoEn)); despierto(true); gps(); syncRastreos(); if (TAB === "pedidos") pintarPedidos(true); }
 // El enlace «Compartir ruta» del cliente se mantiene al día con el estado y el repartidor
 function syncRastreos() { ACT.forEach(x => { if (!x.rastreo) return; const sig = x.estado + "|" + YO.uid, k = "am_rs_" + x.id; if (store.get(k, "") === sig) return; store.set(k, sig);
   DB.set("rastreo", x.rastreo, { estado: x.estado, repartidor: pubRep(), ...(POS ? { ubic: { ...POS, t: ahora() } } : {}) }).catch(e => console.warn("rastreo", e.code || e)); }); }
@@ -19,7 +21,7 @@ const MAX_ACT = 2;                  // pedidos a la vez
 const ACTIVOS_R = ["nuevo", "cocina", "listo", "camino"];
 const pctRep = () => +CONF.rep.comision || 0;
 const ahora = () => new Date().toISOString();
-const soatVencido = r => r && ["moto", "carro"].includes(r.vehiculo) && r.soatVence && r.soatVence < HOY();
+const soatVencido = r => r && ["moto", "carro", "camioneta", "camion"].includes(r.vehiculo) && r.soatVence && r.soatVence < HOY();
 const nav = (la, lo) => `https://www.google.com/maps/dir/?api=1&destination=${la},${lo}`;
 
 /* ================= ARRANQUE ================= */
@@ -81,10 +83,12 @@ function registro(prev) {
     if (paso === 1) C.innerHTML = `<h2>🪪 Tu foto y tu DNI</h2><p class="muted">Fotos claras, con buena luz y sin reflejos.</p>
       ${foto("fotoPerfil", "Foto de perfil · la verán los clientes", "De frente, con buena luz, sin lentes oscuros ni gorra. Así te reconocen al entregar.", "user")}
       <p class="muted sm">🔒 Las fotos de tu DNI solo las ve el administrador de Apamuy.</p>${foto("dniFrente", "DNI · parte de adelante", "Que se lean tu nombre y número.")}${foto("dniReverso", "DNI · parte de atrás", "Que se lea tu dirección.")}`;
-    if (paso === 2) C.innerHTML = `<h2>🛵 ¿Con qué vas a repartir?</h2><div class="veh">${Object.entries(VEHIC).map(([k, [e, t]]) => `<label class="veh-c"><input type="radio" name="vehiculo" value="${k}" ${R.vehiculo === k ? "checked" : ""}><span>${e}</span><b>${t}${k === "moto" ? " propia" : ""}</b><small>${{ moto: "Pedidos normales y pequeños de ferretería", bici: "Pedidos normales, distancias cortas", carro: "Pedidos normales y grandes (ferreterías y talleres)" }[k]}</small></label>`).join("")}</div>
+    if (paso === 2) C.innerHTML = `<h2>🛵 ¿Con qué vas a repartir?</h2><div class="veh">${Object.entries(VEHIC).map(([k, [e, t]]) => `<label class="veh-c"><input type="radio" name="vehiculo" value="${k}" ${R.vehiculo === k ? "checked" : ""}><span>${e}</span><b>${t}${k === "moto" ? " propia" : ""}</b><small>${{ moto: "Pedidos normales y pequeños de ferretería", bici: "Pedidos normales, distancias cortas", carro: "Pedidos normales y grandes (ferreterías y talleres)", camioneta: "Mudanzas pequeñas y envíos grandes", camion: "Mudanzas grandes y carga" }[k]}</small></label>`).join("")}</div>
       <div class="g2">${fld("marca", "Marca y modelo", R.marca || "", { ph: "Ej. Honda CB 125" })}${fld("color", "Color", R.color || "", { req: true, ph: "Ej. Rojo" })}</div>
       <div id="rMot"><div class="g2">${fld("placa", "Placa", R.placa || "", { req: true, ph: "Ej. 1234-4A" })}${fld("licencia", "N° de licencia de conducir", R.licencia || "", { req: true })}${fld("soatVence", "El SOAT vence el", R.soatVence || "", { type: "date", req: true })}</div>
         ${foto("soatFoto", "SOAT vigente", "Foto del certificado o de la página del SOAT electrónico.")}${foto("licenciaFoto", "Licencia de conducir", "La parte donde sale tu foto y la categoría.")}</div>
+      <div id="rCarga"><div class="g2">${fld("capacidad", "Capacidad de carga", R.capacidad || "", { ph: "Ej. 1.5 toneladas" })}${fld("ayudantes", "¿Cuántos ayudantes llevas para cargar?", R.ayudantes ?? 0, { opts: [["0", "Ninguno"], ["1", "1"], ["2", "2"], ["3", "3 o más"]] })}</div>
+        <p class="alert sm">🚚 Recibirás solicitudes de <b>Mudanza</b> (ahora o programadas). <b>Primer mes sin comisión</b>, luego ${MUD_CONF().comision}% de cada mudanza.</p></div>
       ${foto("vehiculoFoto", "Foto de tu vehículo", "Que se vea completo (y la placa si tiene).")}`;
     if (paso === 3) C.innerHTML = `<h2>📄 Antecedentes policiales</h2><p class="muted">Sube tu <b>certificado de antecedentes policiales</b> vigente (foto o PDF). Lo revisamos antes de aprobarte.</p>${foto("antecedentes", "Certificado de antecedentes policiales", "Foto clara o el PDF que te dieron (máx. 4 MB).", "environment", true)}`;
     if (paso === 4) C.innerHTML = `<h2>🏠 ¿Dónde vives?</h2><p class="muted">Tu domicilio exacto. Lo ve solo el administrador.</p><button type="button" class="btn btn-acc" id="rGps">📍 Usar mi ubicación actual (GPS)</button>
@@ -122,7 +126,7 @@ function registro(prev) {
           m.textContent = c.includes("not-found") ? "No encontramos ese DNI. Revisa el número." : c.includes("resource-exhausted") ? "Hiciste muchas consultas hoy. Puedes seguir: lo revisaremos a mano." : c.includes("unauthenticated") ? "Vuelve a entrar con tu cuenta de Google." : "No se pudo consultar ahora. Puedes seguir: lo revisaremos a mano."; }
         b.disabled = false; }; }
     if (paso === 0) { const U = window.UBIGEO || {}, dep = $("#rDep"), pv = () => { const ps = Object.keys(U[dep.value] || {}).sort(); $("#rProv").innerHTML = ps.map(x => `<option ${x === R.provincia ? "selected" : ""}>${esc(x)}</option>`).join(""); }; pv(); dep.onchange = pv; }
-    if (paso === 2) { const v = () => { const r = ($("[name=vehiculo]:checked", F) || {}).value; $("#rMot").hidden = r === "bici"; $$("#rMot [required]").forEach(x => x.disabled = r === "bici"); $("[name=marca]", F).closest("label").hidden = r === "bici"; }; $$("[name=vehiculo]", F).forEach(x => x.onchange = v); v(); }
+    if (paso === 2) { const v = () => { const r = ($("[name=vehiculo]:checked", F) || {}).value; $("#rMot").hidden = r === "bici"; $$("#rMot [required]").forEach(x => x.disabled = r === "bici"); $("[name=marca]", F).closest("label").hidden = r === "bici"; $("#rCarga").hidden = !esCarga(r); }; $$("[name=vehiculo]", F).forEach(x => x.onchange = v); v(); }
     if (paso === 4) { const dom = R.domicilio || {};
       mapaPin($("#rMapa"), dom.lat != null ? dom : centroDe(R.departamento, R.provincia), q => R.domicilio = { ...(R.domicilio || {}), lat: q.lat, lng: q.lng }, { txt: "🏠" }).then(m => MP = m);
       $("#rGps").onclick = async () => { $("#rGps").disabled = true; try { const p = await miUbicacion(); MP && MP.mover(p); toast("Listo · revisa que el pin esté en tu casa"); } catch (e) { avisarUbicacion(e); } $("#rGps").disabled = false; }; }
@@ -132,7 +136,7 @@ function registro(prev) {
   // Guarda lo escrito en R antes de cambiar de paso
   const guardar = () => { const d = datosForm(F);
     if (paso === 0) Object.assign(R, { nombre: d.nombre, dni: String(d.dni).replace(/\D/g, ""), nacimiento: d.nacimiento, celular: String(d.celular).replace(/\D/g, ""), talla: d.talla, departamento: d.departamento, provincia: d.provincia });
-    if (paso === 2) Object.assign(R, { marca: d.vehiculo === "bici" ? "" : d.marca, color: d.color, vehiculo: d.vehiculo || R.vehiculo, placa: (d.placa || "").toUpperCase(), licencia: (d.licencia || "").toUpperCase(), soatVence: d.soatVence });
+    if (paso === 2) Object.assign(R, { marca: d.vehiculo === "bici" ? "" : d.marca, color: d.color, vehiculo: d.vehiculo || R.vehiculo, placa: (d.placa || "").toUpperCase(), licencia: (d.licencia || "").toUpperCase(), soatVence: d.soatVence, capacidad: esCarga(d.vehiculo) ? (d.capacidad || "").slice(0, 30) : "", ayudantes: esCarga(d.vehiculo) ? +d.ayudantes || 0 : 0 });
     if (paso === 4) { R.domicilio = { ...(R.domicilio || {}), texto: d.dir, referencia: d.ref }; const c = R.domicilio.lat != null ? ciudadCercana(R.domicilio) : null; if (c) R.domicilio.distrito = c.dis; }
     if (paso === 5) { R.acepto = d.acepto; R.consentimiento = d.consentimiento; if (firma && !firma.vacia()) R.firmaData = firma.dato(); }
     if (paso === 6) R.casaca = { ...(R.casaca || {}), operacion: d.operacion };
@@ -142,7 +146,7 @@ function registro(prev) {
     if (paso === 0) { if (!/^\d{8}$/.test(R.dni)) return "El DNI tiene 8 números."; if (CONF.verificarDni && R.dniVerificado !== R.dni && R.dniSinVerificar !== R.dni) return "Toca «Verificar» para validar tu DNI."; if (R.celular.length !== 9) return "El celular tiene 9 números.";
       const ed = (Date.now() - new Date(R.nacimiento + "T12:00:00")) / 31557600000; if (!(ed >= 18)) return "Debes ser mayor de 18 años para repartir."; }
     if (paso === 1) { if (!A.fotoPerfil) return "Falta tu foto de perfil."; if (!A.dniFrente || !A.dniReverso) return "Faltan las fotos de tu DNI (adelante y atrás)."; }
-    if (paso === 2) { if (R.vehiculo !== "bici" && !R.marca) return "Escribe la marca de tu vehículo."; if (R.vehiculo !== "bici") { if (!A.soatFoto) return "Falta la foto del SOAT."; if (!A.licenciaFoto) return "Falta la foto de tu licencia."; if (R.soatVence < HOY()) return "Tu SOAT está vencido. Necesitas un SOAT vigente."; } if (!A.vehiculoFoto) return "Falta la foto de tu vehículo."; }
+    if (paso === 2) { if (R.vehiculo !== "bici" && !R.marca) return "Escribe la marca de tu vehículo."; if (esCarga(R.vehiculo) && !R.capacidad) return "Escribe la capacidad de carga de tu vehículo."; if (R.vehiculo !== "bici") { if (!A.soatFoto) return "Falta la foto del SOAT."; if (!A.licenciaFoto) return "Falta la foto de tu licencia."; if (R.soatVence < HOY()) return "Tu SOAT está vencido. Necesitas un SOAT vigente."; } if (!A.vehiculoFoto) return "Falta la foto de tu vehículo."; }
     if (paso === 3 && !A.antecedentes) return "Falta tu certificado de antecedentes policiales.";
     if (paso === 4) { if (!R.domicilio || R.domicilio.lat == null) return "Mueve el pin (o usa el GPS) hasta tu casa."; }
     if (paso === 5) { if (!R.firmaData) return "Firma con tu dedo en el recuadro."; if (!R.acepto) return "Marca que aceptas la declaración jurada."; if (!R.consentimiento) return "Marca la autorización de tus datos personales."; }
@@ -160,7 +164,7 @@ function registro(prev) {
       const firmaR = await subirPrivado(`repartidores/${YO.uid}/firma-${t}.png`, R.firmaData), cap = await sub("casacaCap", "jpg");
       const c = ciudadCercana(R.domicilio) || {};
       const data = { nombre: R.nombre, dni: R.dni, ...(R.dniVerificado === R.dni ? { dniVerificado: R.dni } : {}), nacimiento: R.nacimiento, celular: R.celular, email: YO.email, talla: R.talla, departamento: R.departamento, provincia: R.provincia, prov: provKey(R.departamento, R.provincia),
-        vehiculo: R.vehiculo, marca: R.marca || "", color: R.color || "", fotoPerfil, placa: R.vehiculo === "bici" ? "" : R.placa, licencia: R.vehiculo === "bici" ? "" : R.licencia, soatVence: R.vehiculo === "bici" ? "" : R.soatVence, ...up,
+        vehiculo: R.vehiculo, marca: R.marca || "", color: R.color || "", fotoPerfil, placa: R.vehiculo === "bici" ? "" : R.placa, licencia: R.vehiculo === "bici" ? "" : R.licencia, soatVence: R.vehiculo === "bici" ? "" : R.soatVence, ...(esCarga(R.vehiculo) ? { capacidad: R.capacidad || "", ayudantes: +R.ayudantes || 0 } : {}), ...up,
         domicilio: { texto: R.domicilio.texto, referencia: R.domicilio.referencia || "", lat: R.domicilio.lat, lng: R.domicilio.lng, distrito: R.domicilio.distrito || c.dis || "" },
         firma: firmaR, declaracion: { version: 1, fecha: ahora(), comision: pctRep() }, consentimiento: true, casaca: { monto: +CONF.rep.casaca, operacion: R.casaca.operacion, captura: cap, talla: R.talla },
         estado: "pendiente", disponible: false, actualizado: ahora() };
@@ -212,7 +216,7 @@ function app() {
   DB.escucharLista("envios", [["repUid", "==", YO.uid], ["estado", "in", ["asignado", "camino"]]], async l => {
     for (const e of l) if (!PRIV[e.id]) PRIV[e.id] = await DB.get(`envios/${e.id}/priv`, "datos").catch(() => null);
     const nuevos = l.filter(e => !ACTE.find(x => x.id === e.id) && e.estado === "asignado" && MISOF[e.id]);
-    if (nuevos.length) avisar("✅ ¡Te eligieron!", `Envío ${nuevos[0].codigo} por ${S(nuevos[0].precio)}`);
+    if (nuevos.length) avisar("✅ ¡Te eligieron!", `${nuevos[0].tipo === "mudanza" ? "Mudanza" : "Envío"} ${nuevos[0].codigo} por ${S(nuevos[0].precio)}${nuevos[0].programado ? " · " + fechaMud(nuevos[0].programado) : ""}`);
     ACTE = l.map(e => ({ ...e, _t: "e" })); juntarAct();
   });
   // Mis pedidos en curso
@@ -255,7 +259,7 @@ const enRadio = (o, punto) => { const r = radioAviso(o); return r === Infinity |
 function filtrarOfertas() {
   ENVS = ENVS_T.filter(e => enRadio(e, e.origen));
   const nuevasE = VISTOS_E ? ENVS.filter(e => !VISTOS_E.has(e.id + e.oferta)) : []; VISTOS_E = new Set([...(VISTOS_E || []), ...ENVS.map(e => e.id + e.oferta)]);
-  if (nuevasE.length && ACT.length < MAX_ACT) avisar("📦 Envío de paquete", `${nuevasE[0].origen.dis} → ${nuevasE[0].destino.dis} · ofrecen ${S(nuevasE[0].oferta)}`);
+  if (nuevasE.length && ACT.length < MAX_ACT) { const x = nuevasE[0]; avisar(x.tipo === "mudanza" ? "🚚 Mudanza" : "📦 Envío de paquete", `${x.origen.dis} → ${x.destino.dis} · ofrecen ${S(x.oferta)}${x.programado ? " · " + fechaMud(x.programado) : ""}`); }
   OFS = OFS_T.filter(o => enRadio(o, o.negocio && o.negocio.ubic));
   const nuevas = VISTOS ? OFS.filter(o => !VISTOS.has(o.id + o.creado)) : []; VISTOS = new Set([...(VISTOS || []), ...OFS.map(o => o.id + o.creado)]);
   if (nuevas.length && ACT.length < MAX_ACT) avisar("🛵 ¡Nuevo pedido!", `${nuevas[0].negocio.nombre} · ganas ${S(nuevas[0].envio)}`);
@@ -266,7 +270,7 @@ function escucharOfertas(on) {
   let listoE = false, listoO = false;
   PARAR_EN = DB.escucharLista("envios", [["prov", "==", REP.prov], ["estado", "==", "buscando"]], l => {
     const lim = Date.now() - BUSQ_MIN * 60e3;
-    ENVS_T = l.filter(e => puedeEnvio(e, REP.vehiculo) && new Date(e.buscadoEn) > lim);
+    ENVS_T = l.filter(e => puedeEnvio(e, REP.vehiculo) && (e.tipo === "mudanza" && e.programado ? new Date(e.programado) - Date.now() > 3600e3 : new Date(e.buscadoEn) > lim));
     if (!listoE) { listoE = true; VISTOS_E = new Set(ENVS_T.filter(e => enRadio(e, e.origen)).map(e => e.id + e.oferta)); }
     filtrarOfertas(); if (TAB === "pedidos") pintarPedidos(true);
   });
@@ -312,13 +316,15 @@ function pintarPedidos(silencioso) {
   const dist = o => POS && o.negocio.ubic ? distanciaKm(POS, o.negocio.ubic) : null;
   const ofs = OFS.slice().sort((a, b) => (dist(a) ?? 99) - (dist(b) ?? 99));
   const dE = e => POS ? distanciaKm(POS, e.origen) : null, envs = ENVS.slice().sort((a, b) => (dE(a) ?? 99) - (dE(b) ?? 99));
-  const htmlEnv = on && envs.length ? `<h2 class="a-t">📦 Envíos de paquetes <b>${envs.length}</b></h2>${envs.map(e => { const d = dE(e), mio = MISOF[e.id];
-      return `<article class="of env ${ESP.sel === "e:" + e.id ? "sel" : ""}" data-sel="e:${esc(e.id)}"><div class="of-h"><b>${esc(TAM[e.tamano]?.[0] || "Paquete")}</b><strong>${S(e.oferta)}</strong></div>
+  const htmlAgen = AGEN.length ? `<h2 class="a-t">📅 Mudanzas agendadas <b>${AGEN.length}</b></h2>${AGEN.map(tarjetaAgendada).join("")}` : "";
+  const htmlEnv = on && envs.length ? `<h2 class="a-t">${esCarga(REP.vehiculo) ? "🚚 Mudanzas y envíos" : "📦 Envíos de paquetes"} <b>${envs.length}</b></h2>${envs.map(e => { const d = dE(e), mio = MISOF[e.id];
+      return `<article class="of env ${e.tipo === "mudanza" ? "mud" : ""} ${ESP.sel === "e:" + e.id ? "sel" : ""}" data-sel="e:${esc(e.id)}"><div class="of-h"><b>${e.tipo === "mudanza" ? `🚚 Mudanza · ${esc(MUD[e.carga]?.[0] || "")}` : esc(TAM[e.tamano]?.[0] || "Paquete")}</b><strong>${S(e.oferta)}</strong></div>
+        ${e.tipo === "mudanza" ? `<p class="mud-l">${e.programado ? `📅 <b>${esc(fechaMud(e.programado))}</b>` : "⚡ <b>Ahora</b>"} · ${esc(mudTxt(e))}</p>` : ""}
         <p><span class="lg a">A</span> ${esc(e.origen.dis)}${d != null ? ` · <b>~${d.toFixed(1)} km de ti</b> <small class="muted">en línea recta</small>` : ""}</p><p><span class="lg b">B</span> ${esc(e.destino.dis)}${e.interprov ? `, ${esc(e.destino.provincia)}` : ""} · ${e.km} km de viaje</p>
-        <div class="tags">${e.interprov ? `<span class="st warn">🚩 Interprovincial</span>` : ""}<span class="st">${esc(e.contenido)}</span><span class="st">${e.paga === "recibe" ? "Paga quien recibe" : "Pagan al recoger"}</span><span class="st mute">${hace(e.buscadoEn)}</span></div>
+        <div class="tags">${e.interprov ? `<span class="st warn">🚩 Interprovincial</span>` : ""}<span class="st">${esc(e.contenido)}</span><span class="st">${e.tipo === "mudanza" ? "Pagan al terminar" : e.paga === "recibe" ? "Paga quien recibe" : "Pagan al recoger"}</span><span class="st mute">${hace(e.buscadoEn)}</span></div>
         ${mio ? `<div class="alert sm">⏳ Enviaste <b>${S(mio)}</b>. El cliente ve tu distancia y elige: si te elige, te avisamos con sonido.</div>` : ""}
         <div class="of-b">${mio === e.oferta ? `<button class="btn btn-pri" disabled>Esperando al cliente…</button>` : `<button class="btn btn-pri" data-tomarE="${esc(e.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>Aceptar ${S(e.oferta)}</button>`}<button class="btn btn-light" data-contra="${esc(e.id)}" ${ACT.length >= MAX_ACT ? "disabled" : ""}>${mio ? "Cambiar precio" : "Contraofertar"}</button></div></article>`; }).join("")}` : "";
-  const html = `${ACT.map(tarjetaActiva).join("")}${htmlEnv}
+  const html = `${ACT.map(tarjetaActiva).join("")}${htmlAgen}${htmlEnv}
     ${on ? `<h2 class="a-t">Pedidos cerca de ti ${ofs.length ? `<b>${ofs.length}</b>` : ""}</h2>${OFS_T.length + ENVS_T.length > OFS.length + ENVS.length ? `<p class="muted sm lejos-h">📡 Hay ${OFS_T.length + ENVS_T.length - OFS.length - ENVS.length} pedido(s) más lejos en tu provincia. Primero se avisa a los más cercanos; si nadie lo toma, en unos minutos te aparece.</p>` : ""}
       ${ACT.length >= MAX_ACT ? `<div class="alert">ℹ️ <span>Ya llevas ${MAX_ACT} pedidos. Entrega uno para tomar otro.</span></div>` : ""}
       ${ofs.map(o => { const d = dist(o); return `<article class="of ${o.vehiculo === "carro" ? "grande" : ""} ${ESP.sel === "o:" + o.id ? "sel" : ""}" data-sel="o:${esc(o.id)}"><div class="of-h"><b>${esc(o.negocio.nombre)}</b><strong>${S(o.envio)}</strong></div>
@@ -396,8 +402,8 @@ async function cargarGanancias() {
     DB.list("envios", ["repUid", "==", YO.uid], ["mes", "==", m]).catch(() => []), DB.list("envios", ["repUid", "==", YO.uid], ["mes", "==", mp]).catch(() => [])]).catch(e => { console.warn(e); return [[], [], [], [], []]; });
   PAGOS = pg.sort((x, y) => String(y.creado).localeCompare(x.creado));
   const cub = {}; PAGOS.filter(x => x.estado !== "rechazado").forEach(x => (x.dias || []).forEach(d => cub[d] = x.estado));
-  const D = {}; [...a, ...b, ...[...ea, ...eb].map(e => ({ ...e, envio: e.precio }))].filter(p => p.estado === "entregado").forEach(p => { const r = D[p.dia] || (D[p.dia] = { dia: p.dia, n: 0, gan: 0 }); r.n++; r.gan += +p.envio || 0; });
-  GAN.dias = Object.values(D).map(r => ({ ...r, gan: r2(r.gan), com: r2(r.gan * pctRep() / 100), pago: cub[r.dia] || null })).sort((x, y) => y.dia.localeCompare(x.dia));
+  const D = {}; [...a, ...b, ...[...ea, ...eb].map(e => ({ ...e, envio: e.precio }))].filter(p => p.estado === "entregado").forEach(p => { const r = D[p.dia] || (D[p.dia] = { dia: p.dia, n: 0, gan: 0, com: 0 }); r.n++; r.gan += +p.envio || 0; r.com += comEntrega(p, REP, pctRep()); });
+  GAN.dias = Object.values(D).map(r => ({ ...r, gan: r2(r.gan), com: r2(r.com), pago: cub[r.dia] || null })).sort((x, y) => y.dia.localeCompare(x.dia));
   GAN.deuda = GAN.dias.filter(r => r.dia < HOY() && r.com > 0 && !r.pago);
   GAN.hoy = GAN.dias.find(r => r.dia === HOY()) || { dia: HOY(), n: 0, gan: 0, com: 0 };
   if ($("#disp")) estadoDisp(); if (TAB === "ganancias" && $("#v")) pintarGanancias();
@@ -484,13 +490,14 @@ function contraofertar(e) {
 function tarjetaEnvio(e) {
   const pv = PRIV[e.id] || {}, cli = pv.cliente || {}, rec = pv.receptor || {}, rec2 = e.estado === "camino", B = (a, t, c = "btn-light") => `<button class="btn ${c}" data-acc="${a}|${esc(e.id)}">${t}</button>`;
   const cobraAqui = (e.paga === "recibe") === rec2, P = rec2 ? e.destino : e.origen, quien = rec2 ? rec : cli;
-  return `<article class="act env"><div class="act-h"><span class="st ${rec2 ? "info" : "fire"}">${rec2 ? "📦 Llevando el paquete" : "📍 Ve a recoger el paquete"}</span><span class="mono">${esc(e.codigo)}</span></div>
+  const MU = e.tipo === "mudanza";
+  return `<article class="act env"><div class="act-h"><span class="st ${rec2 ? "info" : "fire"}">${MU ? (rec2 ? "🚚 Llevando la mudanza" : "📍 Ve al punto de carga") : rec2 ? "📦 Llevando el paquete" : "📍 Ve a recoger el paquete"}</span><span class="mono">${esc(e.codigo)}</span></div>
     <div class="mapa act-m" id="m-${esc(e.id)}"></div>
     <div class="act-b"><h3><span class="lg ${rec2 ? "b" : "a"}">${rec2 ? "B" : "A"}</span> ${rec2 ? "Entregar a" : "Recoger de"} ${esc(quien.nombre || "")}</h3><p>${esc(P.texto)}${P.referencia ? `<br><small>${esc(P.referencia)}</small>` : ""}<br><small>${esc(P.dis)}, ${esc(P.provincia)}</small></p>
       <div class="acts"><a class="btn btn-acc" href="${nav(P.lat, P.lng)}" target="_blank" rel="noopener">🧭 Cómo llegar</a>${quien.celular ? `<a class="btn btn-light" href="tel:${esc(quien.celular)}">📞 Llamar</a><a class="btn btn-wa" href="${esc(wa(quien.celular, `Hola ${(quien.nombre || "").split(" ")[0]} 👋 soy ${REP.nombre.split(" ")[0]}, repartidor de Apamuy. ${rec2 ? "Estoy en camino con tu paquete." : "Voy a recoger el paquete."}`))}" target="_blank" rel="noopener">WhatsApp</a>` : ""}</div>
-      <p class="muted sm">📦 ${esc(e.contenido)} · ${esc(TAM[e.tamano]?.[0] || "")}${e.interprov ? " · 🚩 interprovincial" : ""}${!rec2 ? ` · entrega en ${esc(e.destino.dis)} (${esc(rec.nombre || "")})` : ""}</p>
+      <p class="muted sm">${MU ? `🚚 ${esc(e.contenido)}<br>${esc(mudTxt(e))}${e.programado ? `<br>📅 ${esc(fechaMud(e.programado))}` : ""}` : `📦 ${esc(e.contenido)} · ${esc(TAM[e.tamano]?.[0] || "")}`}${e.interprov ? " · 🚩 interprovincial" : ""}${!rec2 && !MU ? ` · entrega en ${esc(e.destino.dis)} (${esc(rec.nombre || "")})` : ""}</p>
       <div class="cobro ${cobraAqui ? "ef" : ""}">${cobraAqui ? `💵 <b>Cobra ${S(e.precio)} ${rec2 ? "al entregar" : "al recoger"}</b><small>En efectivo o a tu Yape.</small>` : `✅ <b>${rec2 ? "Ya cobraste al recoger." : `Cobras ${S(e.precio)} al entregar.`}</b><small>${rec2 ? "Solo entrega el paquete." : "Paga quien recibe."}</small>`}</div>
-      <div class="acts">${rec2 ? B("entregarE", `✅ Entregado · ${S(e.precio)}`, "btn-pri btn-lg") : B("recogerE", "📦 Ya recogí el paquete", "btn-pri btn-lg") + B("soltarE", "No puedo llevarlo")}</div></div></article>`;
+      <div class="acts">${rec2 ? B("entregarE", MU ? `✅ Mudanza terminada · ${S(e.precio)}` : `✅ Entregado · ${S(e.precio)}`, "btn-pri btn-lg") : B("recogerE", MU ? "🚚 Ya cargué, voy en camino" : "📦 Ya recogí el paquete", "btn-pri btn-lg") + B("soltarE", "No puedo llevarlo")}</div></div></article>`;
 }
 async function accionEnvio(a, e) {
   const upd = d => DB.set("envios", e.id, { ...d, actualizado: ahora() });
@@ -554,7 +561,7 @@ function espYo() {
 // Lista de pedidos para el mapa (pedidos de comida y envíos de paquetes)
 function espItems(ofs, envs) {
   const it = [...ofs.filter(o => o.negocio.ubic).map(o => ({ k: "o:" + o.id, tipo: "o", nombre: o.negocio.nombre, precio: o.envio, pick: o.negocio.ubic, zona: o.zonaUbic || null, zonaTxt: o.zona, km: o.km })),
-    ...envs.map(e => ({ k: "e:" + e.id, tipo: "e", nombre: TAM[e.tamano]?.[0] || "Paquete", precio: e.oferta, pick: e.origen, zona: e.destino, zonaTxt: e.destino.dis + (e.interprov ? ", " + e.destino.provincia : ""), km: e.km }))];
+    ...envs.map(e => ({ k: "e:" + e.id, tipo: "e", nombre: e.tipo === "mudanza" ? "Mudanza · " + (MUD[e.carga]?.[0] || "") : TAM[e.tamano]?.[0] || "Paquete", precio: e.oferta, pick: e.origen, zona: e.destino, zonaTxt: e.destino.dis + (e.interprov ? ", " + e.destino.provincia : ""), km: e.km }))];
   const firma = JSON.stringify(it.map(x => [x.k, x.precio]));
   if (firma === ESP.firma) return; ESP.firma = firma; ESP.items = it; espPintar();
 }
@@ -593,4 +600,14 @@ async function espRuta() {
   ESP.rutaDesde = { ...POS }; const k = ESP.sel, r = await rutaCalles(POS, it.pick);
   if (ESP.sel !== k) return;
   L.polyline(r.pts, { color: "#E63946", weight: 5, opacity: .9, dashArray: r.recta ? "8 8" : null }).addTo(ESP.ruta); pinta(r);
+}
+
+// Mudanza programada ya confirmada: se muestra aparte hasta 2 h antes (no ocupa tu cupo de pedidos)
+function tarjetaAgendada(e) {
+  const pv = PRIV[e.id] || {}, cli = pv.cliente || {};
+  return `<article class="act env mud"><div class="act-h"><span class="st info">📅 ${esc(fechaMud(e.programado))}</span><span class="mono">${esc(e.codigo)}</span></div><div class="act-b">
+    <h3>🚚 ${esc(MUD[e.carga]?.[0] || "Mudanza")} · ${S(e.precio)}</h3><p><span class="lg a">A</span> ${esc(e.origen.texto)}, ${esc(e.origen.dis)}<br><span class="lg b">B</span> ${esc(e.destino.texto)}, ${esc(e.destino.dis)}</p>
+    <p class="muted sm">${esc(mudTxt(e))}${e.contenido ? `<br>${esc(e.contenido)}` : ""}</p>
+    <div class="acts">${cli.celular ? `<a class="btn btn-light" href="tel:${esc(cli.celular)}">📞 Llamar a ${esc((cli.nombre || "").split(" ")[0])}</a><a class="btn btn-wa" href="${esc(wa(cli.celular, `Hola ${(cli.nombre || "").split(" ")[0]}, soy tu conductor de Apamuy para la mudanza del ${fechaMud(e.programado)}.`))}" target="_blank" rel="noopener">WhatsApp</a>` : ""}
+      <button class="btn btn-light" data-acc="soltarE|${esc(e.id)}">No podré ir</button></div><p class="muted sm">Te avisamos un día antes y 1 hora antes. Aparecerá como pedido activo 2 horas antes.</p></div></article>`;
 }

@@ -137,3 +137,6 @@ details { background: #faf6f1; border-radius: 12px; padding: 8px 12px; margin: 8
 
 /* Aviso de ubicación simple */
 .ub-ayuda summary { cursor: pointer; text-decoration: underline; } .ub-ayuda .pasos-ub li { margin-bottom: 6px; }
+
+/* Mudanza */
+.of.mud { border-left: 4px solid #0F7B6C; } .mud-l { font-size: .85rem; margin: 4px 0; } .act.mud { border-color: #0F7B6C; }

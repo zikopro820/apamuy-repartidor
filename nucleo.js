@@ -429,7 +429,24 @@ if (navigator.permissions) navigator.permissions.query({ name: "geolocation" }).
 
 /* ---------- Pedidos ---------- */
 const EST_P = { "por-validar": ["Pago por validar", "warn"], nuevo: ["Nuevo", "pri"], cocina: ["Preparando", "fire"], listo: ["Listo", "info"], camino: ["En camino", "info"], entregado: ["Entregado", "ok"], rechazado: ["Pago rechazado", "bad"], anulado: ["Anulado", "bad"] };
-const VEHIC = { moto: ["🛵", "Moto"], bici: ["🚲", "Bici"], carro: ["🚗", "Carro"] };
+const VEHIC = { moto: ["🛵", "Moto"], bici: ["🚲", "Bici"], carro: ["🚗", "Carro"], camioneta: ["🛻", "Camioneta / furgón"], camion: ["🚚", "Camión"] };
+const CARGA_V = ["camioneta", "camion"];               // vehículos de carga: reciben mudanzas (y también envíos grandes)
+const esCarga = v => CARGA_V.includes(v);
+/* ---------- Mudanza ---------- */
+const MUD = { pocas: ["Pocas cosas", "Unos muebles o cajas", ["camioneta", "camion"]], cuarto: ["Un cuarto", "Cama, ropero, cajas", ["camioneta", "camion"]], depa: ["Departamento", "2 a 3 ambientes", ["camion", "camioneta"]], casa: ["Casa completa", "Toda la casa", ["camion"]] };
+const MUD_CONF = () => ({ minimo: 40, base: 40, porKm: 4, carga: { pocas: 0, cuarto: 40, depa: 120, casa: 250 }, ayudante: 30, comision: 10, gratisDias: 30, ...(CONF.mudanza || {}) });
+function sugerirMudanza(km, carga, ayud) { const m = MUD_CONF(); if (km == null) return m.minimo; const v = m.base + Math.max(0, km - 2) * m.porKm + (m.carga[carga] || 0) + (+ayud || 0) * m.ayudante; return Math.max(m.minimo, Math.ceil(v / 5) * 5); }
+// Texto corto de los datos de una mudanza (para el seguimiento)
+const mudTxt = e => [MUD[e.carga]?.[0], e.ayudantes ? `${e.ayudantes} ayudante${e.ayudantes > 1 ? "s" : ""}` : "sin ayudantes", `piso ${e.pisoA || 1}${e.ascA ? " (ascensor)" : ""} → piso ${e.pisoB || 1}${e.ascB ? " (ascensor)" : ""}`].filter(Boolean).join(" · ");
+const fechaMud = iso => new Date(iso).toLocaleString("es-PE", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+// Comisión de Apamuy por una entrega del repartidor. Mudanza: gratis el primer mes de cada conductor de carga, luego el %.
+function comEntrega(p, rep, pctGeneral) {
+  const monto = +(p.tipo === "mudanza" ? p.precio : (p.envio ?? p.precio)) || 0;
+  if (p.tipo !== "mudanza") return monto * (+pctGeneral || 0) / 100;
+  const m = MUD_CONF(), ini = rep && (rep.cargaDesde || rep.aprobado), dia = p.dia || isoD(p.entregado || p.creado || new Date());
+  if (ini && dia < addD(isoD(ini), m.gratisDias)) return 0;
+  return monto * m.comision / 100;
+}
 const vehTxt = v => (VEHIC[v] || ["🛵", v || ""]).join(" ");
 // ¿Este repartidor puede llevar esta oferta? todos | carro (envío grande) | moto (envío pequeño de ferretería/taller)
 const puedeLlevar = (oferta, veh) => !oferta.vehiculo || oferta.vehiculo === "todos" || oferta.vehiculo === veh;
@@ -439,7 +456,8 @@ const EST_E = { buscando: ["Buscando repartidor", "warn"], asignado: ["Repartido
 // Precio sugerido (solo guía: el cliente decide). Redondeado a 0.50 y nunca menos del mínimo.
 function sugerirEnvio(km, tam, e = CONF.envio) { if (km == null) return e.minimo; const v = (e.base + Math.max(0, km - 1) * e.porKm) * (tam === "grande" ? e.factorGrande : 1); return Math.max(e.minimo, Math.ceil(v * 2) / 2); }
 // ¿Un repartidor puede llevar este envío? Grande = solo carro. Bici: hasta 15 km y en la misma ciudad.
-const puedeEnvio = (en, veh) => (en.tamano !== "grande" || veh === "carro") && (veh !== "bici" || (!en.interprov && (en.km || 0) <= 15));
+const puedeEnvio = (en, veh) => en.tipo === "mudanza" ? esCarga(veh)
+  : (en.tamano !== "grande" || veh === "carro" || esCarga(veh)) && (veh !== "bici" || (!en.interprov && (en.km || 0) <= 15));
 // Estrellas del repartidor: ★ 4.8 (12)
 const promEstrellas = r => r && r.estrellasN ? Math.round(r.estrellasSum / r.estrellasN * 10) / 10 : null;
 const estrellasTxt = (prom, n) => prom ? `★ ${prom.toFixed(1)}${n ? ` (${n})` : ""}` : "Nuevo";
