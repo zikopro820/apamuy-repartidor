@@ -186,7 +186,8 @@ const Sesion = {
     const pend = sessionStorage.getItem("am_auth_pend"); sessionStorage.removeItem("am_auth_pend");
     au.getRedirectResult(auth).then(r => { if (pend && !r && !auth.currentUser) avisarErrorAuth("Volviste de Google, pero el navegador no guardó la sesión. Ábrelo en Chrome o Safari (no dentro de WhatsApp o Facebook) y vuelve a intentar."); })
       .catch(e => avisarErrorAuth(errorAuth(e)));
-    au.onAuthStateChanged(auth, u => { Sesion.usuario = u ? { uid: u.uid, email: (u.email || "").toLowerCase(), nombre: u.displayName || "", foto: u.photoURL || "" } : null; cb(Sesion.usuario); });
+    au.onAuthStateChanged(auth, u => { if (u && u.isAnonymous) u = null;   // el inicio anónimo (pedidos en mesa) no cuenta como sesión
+      Sesion.usuario = u ? { uid: u.uid, email: (u.email || "").toLowerCase(), nombre: u.displayName || "", foto: u.photoURL || "" } : null; cb(Sesion.usuario); });
   },
   async google() {
     if (DEMO) return Sesion._demo({ uid: "cli-demo", email: "cliente@demo.pe", nombre: "Cliente Demo", foto: "" });
